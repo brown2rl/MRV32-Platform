@@ -3,7 +3,7 @@ The MRV32 Platform: A Custom RV32 Soft-Core Processor and Experimental Operating
 OVERVIEW	
 	
 	The MRV32 Platform is a combined synthesizable RV32 soft-core and minimal, bare-metal trap/syscall-based OS. It is written in Verilog HDL and C, with some 32 bit machine code, and has been tested on the Basys 3 FPGA by Digilent. 
-	MRV32 was conceived in the spirit of autodidactic learning, experimentation, and education for those interested in soft-core CPU design. It was an attempt at creating a whole, working system that runs (ported) third party software, implementing the RV32IM ISA. It is inspired by Ben Eater's Youtube Channel, digital ham radio, and "Digital Computer Electronics" by Albert Paul Malvino and Jerald Brown.
+	MRV32 was conceived in the spirit of autodidactic learning, experimentation, and education for those interested in soft-core CPU design. It was an attempt at creating a whole, working system that runs (ported) third party software, implementing the RV32IM ISA. It is inspired by Ben Eater's Youtube Channel, David Marion (AKA FPGA Dude), digital ham radio, and "Digital Computer Electronics" by Albert Paul Malvino and Jerald Brown.
 	Key features of the MRV32 Platform are as follows: RV32IM instruction set architecture, centralized hardware control with multiple fixed datapaths, UART connectivity, and a minimal shell and kernel OS reminiscent of earlier Unix (file descriptors and syscalls).
 	The MIT license applies to both the platform's OS and hardware.
 
