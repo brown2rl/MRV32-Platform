@@ -12,14 +12,14 @@ CONTROL MODULE
 	
 	The Platform's Control Module (CM) is home to the coding of the RV32IM instructions. These instructions consist of steps, constituted by assignments to per instruction datapaths and control bits. In these steps, the control bits are activated and deactivated to direct the functioning of most of the rest of the system. Parts of the system that are not controlled by the CM are controlled by the Trap Unit. A T counter is utilized for advancement through the steps. 
 	The steps of every instruction in the platform can be broken down into two sets: the fetch cycle and the execution cycle. The following paragraphs provide a view into each cycle's purpose and functioning.
-	The fetch cycle is literally the part of the instruction where it is fetched from the memory. This occurs with the help of the PC, Memory Address Register (MAR), RAM, Instruction Register (IR), and the CM. Before the official fetch cycle of an instruction, the PC is usually incremented. In the event that the PC is incremented, the purpose of doing so is to ensure that the next instruction will ultimately be fetched by the CM, as opposed to the one that the PC is currently pointing to. If the PC is not incremented, it is because the current instruction is a jumping or branching instruction. These instructions set the PC themselves. Once the PC is incremented, the CM issues an spm (set pc mar) signal to the MAR, which cause it to assign the value being assigned onto it by the PC to the "MAR" reg. This reg is continuously asserted onto the RAM for the purpose of selecting an active RAM address. The MAR -> RAM datapath does not require a control bit for latching: whatever the MAR is set to, that will be the active RAM address. After the RAM has been accessed in a clocked fashion, sri (set ram ir) is issued to register the contents of that RAM address in the IR. The contents of the IR are asserted onto the CM using combinational logic, similar to the MAR -> RAM datapath.
+	The fetch cycle retrieves the instruction from memory. This occurs with the help of the PC, Memory Address Register (MAR), RAM, Instruction Register (IR), and the CM. Before the official fetch cycle of an instruction, the PC is usually incremented. In the event that the PC is incremented, the purpose of doing so is to ensure that the next instruction will ultimately be fetched by the CM, as opposed to the one that the PC is currently pointing to. If the PC is not incremented, it is because the current instruction is a jumping or branching instruction. These instructions set the PC themselves. Once the PC is incremented, the CM issues an spm (set pc mar) signal to the MAR, which cause it to assign the value being assigned onto it by the PC to the "MAR" reg. This reg is continuously asserted onto the RAM to select an active RAM address. The MAR -> RAM datapath does not require a control bit for latching: whatever the MAR is set to, that will be the active RAM address. After the RAM has been accessed in a clocked fashion, sri (set ram ir) is issued to register the contents of that RAM address in the IR. The contents of the IR are asserted onto the CM using combinational logic, similar to the MAR -> RAM datapath.
 	The execution cycle is the part of the instruction that is unique to each instruction. It is the "business end" of the instruction. Here, the control bits and datapaths are set to perform the instruction's intended task. Without the execution cycle, there would be no point to having an instruction at all. The CM is directed to the steps of the execution cycle for any given instruction by the word (32 bit contents of RAM containing the instruction) that was fetched from the RAM.
 	Though T is initialized at 0, not every instruction starts at T = 0. This is because MRV32 utilizes a simultaneous fetch and execute system for the majority of its instructions. For instructions following a simultaneous fetch/execute, there is a 3 T count reduction in number of steps. Excluding hardware division and associated instructions, this is roughly an average of 38% reduction in instruction time when utilized.
 
 	 
 PROGRAM COUNTER
 
-	The Platform's PC is advanced with most instructions for the purpose of advancing to the next instruction of the program. This happens via the pc control signal. In instances where pc is not issued, the program counter still has to be set properly for the correct instruction to be sent to the CM. This happens in branch and jump instructions and in traps. 
+	The Platform's PC is incremented with most instructions for the purpose of advancing to the next instruction of the program. This happens via the pc control signal. In instances where pc is not issued, the program counter still has to be set properly for the correct instruction to be sent to the CM. This happens in branch and jump instructions and in traps. 
 	The memory in RV32 is byte addressed. This means that for the PC to advance to the next instruction, it has to be incremented by the number of bytes in an instruction, and since there are 32 bits per instruction (4 bytes), it has to be incremented by 4.
 	
 	
@@ -31,7 +31,7 @@ MEMORY ADDRESS REGISTER
 RANDOM ACCESS MEMORY
 
 	In the MRV32 Platform, the RAM is currently home to the memory for instructions as well as data. The Platform uses 32768 32-bit words of RAM. This allows for a small kernel/shell, some third party user programs, and some files. In the future, this may be expanded to microSD card memory for larger programs or more files.
-	All RAM access is clocked. This is for the purpose of utilizing the BRAM that comes with the Basys 3. Without clocking the RAM access, BRAM utilization in Vivado would be impossible.
+	All RAM access is clocked. This is so that the Basys 3's BRAM can be utilizied. Without clocking the RAM access, BRAM utilization in Vivado would be impossible.
 	As mentioned earlier, RV32's memory is byte addressed, in 32 bit words. Loads and stores of byte, half word, and word sizes are supported. 
 	For byte selection, the least significant two bits of what starts off as MAR_RAM are used. From that, the write enable bits are determined for stores, and the individual byte to be read is determined for instances of single byte reads.
 	For writing, the store data is broken up into either 4 similar bytes, 2 similar halves, or one word. The store data is then sent through a write enable mask that puts it in the correct byte, half, or word.
@@ -67,6 +67,7 @@ CONTROL AND STATUS REGISTERS
 	-mhartid	(hardware thread number)
 
 These (plus tx and rx interrupt vectors) also happen to be the CSRs that are included in MRV32.
+	One special CSR is the "device select" (devsel). Its purpose is to route loads and stores (reads and writes) to either the REGS or the SD card controller. It does this by changing the control bits in the CM for the lbu and sb instructions. When CSR_DEV_SEL == 0, lbu and sb work as they always have: they load and store between REGS and RAM. When the devsel == 1, the lbu and sb instructions use their specified registers (rs1, rs2, and rd) to specify which memory address and SD card block address will be accessed during the transaction. The bytes are transferred in or out for the transaction, as described in the SD CARD CONTROLLER section, and there is a direct link between the RAM and the SD Card Controller over which the data is transferred.
 	
 	
 ARITHMETIC LOGIC UNIT
@@ -80,6 +81,27 @@ TRAP UNIT
 
 	The purpose of the Trap Unit (TU) in a RISC-V system is to manage the handling of syscalls and other interrupts. Syscalls and interrupts are special OS functions that are separate from the user program and are used for input, output, file opening and closing, starting and exiting user programs, etc. 
 	This functioning can vary according to the hardware, but in the MRV32 Platform it is relatively straightforward. There are three trap vectors: mtvec, tx interrupt vector, and rx interrupt vector. When an ecall instruction is issued, the PC goes straight to mtvec. This is for the purpose of performing kernel functions (syscalls). For example, if your user program were to want to put some text on the screen, it would load registers x10 through x12, as well as x17 with the appropriate file descriptor, a pointer to the text, how many characters to print, and the syscall number for "sys_write" (which is the syscall for putting text on the screen in the platform), and then an ecall would be issued. The PC would jump straight to mtvec (which is loaded into the hardware at boot), the return address would be stored in mepc, and the kernel code for sys_write would be dispatched. Then, your text would appear on the screen. One special thing about sys_write is that it actually contains an interrupt inside of an interrupt, which means that inside of the kernel code, which is accessed via interrupt, a second interrupt occurs for putting the characters on the screen. The main difference between the tx interrupt and the initial syscall (in MRV32) is that the tx interrupt stores the return value in "ra" (a register reserved for return addresses) and not a CSR. 
+	
+	
+SD CARD CONTROLLER
+
+The SD card controller is the module that issues commands to the SD card via the SPI Engine for reading from or writing to the SD card. This takes place in stages. First, the controller first needs to initialize the card. Then, it will be in a position to either write or read to or from the SD card. This requires going through a sequence of transmitted commands and received responses. Once the card is initialized, it is free to make reads or writes.
+
+The MRV32 Platform currently uses single block reads and writes to transfer data. For reads and writes, a command with the desired SD card storage block as the argument needs to be issued. For reads, clocks are fed to the card along with 0xFFs, and the data is read from the output of the card. For writes, clocks are fed to the card and the input to the card is fed the bits to be written, starting with the MSB. The whole, detailed process for SD card initialization, reads, and writes can be found in the appendix.
+
+
+SAR
+
+The SAR (Storage Address Register) is similar to the MAR. It is where the address is held that points to a particular block of SD card storage memory to be written to or read from. The address is simply registered in the SAR, and asserted via blocking assignment to the SD card controller over the SAR_SDC datapath. The SAR itself is set via the REGS_SAR datapath, which is set via an lbu or sb instruction when CSR_DEV_SEL == 1. 
+
+
+SPI ENGINE
+
+The SPI Engine is the interface between the SD card controller and the SD card. It has its own clock, the rate of which is adjusted by the SD controller. SPI is a common protocol and can also be used for peripherals other than SD cards.
+
+For the SD card, it works by sending commands (which are 6 bytes long, and consist of the command number, the argument, and the crc, MSB first), followed by 0xFF bytes, and then sampling miso.
+
+The engine has four connections to the SD card: sclk (the SPI clock), cs (chip select: activates the card (or other peripheral) for initialization, reads, and writes), mosi (master out, slave in: the line which carries data from the computer to the peripheral device), and miso (master in, slave out: the line that carries data from the peripheral to the computer).
 	
 	
 UART
@@ -105,7 +127,7 @@ BOOT
 
 DIRECTORY STRUCTURE
 
-	The directory structure is a struct called directory_entry_t with attributes name[MAX_FILENAME], starting_addr, size, and used. There are MAX_FILENAME entries in the table, and the used attribute allows the OS to see which entries are in use for the purpose of turning an unused entry into a new file.
+	The directory structure is a struct called directory_entry_t with attributes name[MAX_FILENAME], starting_addr, size, and used. There are MAX_FILENAME entries in the table, and the used attribute allows the OS to see which entries are in use so that it can turn an unused entry into a new file.
 
 	
 TRAP ENTRY/SYSCALL DISPATCH
@@ -117,7 +139,7 @@ TRAP ENTRY/SYSCALL DISPATCH
 	
 SHELL
 
-	The OS's shell prints a prompt via write syscall and takes input via read sys_calls. It includes support for backspace and delete. Once the input has been taken, the string is processed for the purpose of being passed to the execve syscall (which is responsible for launching user programs), which will either start the program or print "INVALID COMMAND." This works by execve returning 0 if it fails to open the program. 
+	The OS's shell prints a prompt via write syscall and takes input via read sys_calls. It includes support for backspace and delete. Once the input has been taken, the string is processed so that it can be passed to the execve syscall (which is responsible for launching user programs), which will either start the program or print "INVALID COMMAND." This works by execve returning 0 if it fails to open the program. 
 
 
 SYSCALLS AND FILE DESCRIPTORS
@@ -136,6 +158,11 @@ SYSWRITE AND SYSREAD
 	The TTY read handler is a little different, but like the TTY write handler, it sits on a wfi instruction for a portion of its cycle and relies upon an interrupt vector. It works by sitting on a wfi (wait for interrupt) until an RX interrupt comes, then jumping to the RX interrupt vector when a key is pressed.
 	In Unix-like TTY reads, there is more than one mode of text processing. These modes are known as canonical and raw mode. Canonical mode is the type of processing that accepts characters either until enter is pressed or until the buffer has reached its limit. One example of canonical mode would be the terminal. Raw mode accepts one character at a time. This is similar to pressing enter after every character. Text editors use raw mode. The raw flag determines raw/canonical behavior.
 	
+	
+SYS_SD_WRITE AND SYS_SD_READ
+
+SYS_SD_READ and SYS_SD_WRITE are similar to SYS_WRITE and SYS_READ, except instead of reading and writing a file or the tty, they read and write from and to a connected SD card. This is accomplished by using the device select CSR to change how lbu and sb instructions work. When this particular CSR is set to 0, loads and stores behave normally, but when it is set to 1 lbu and sb transfer data between the memory and the storage. This is achieved by making the control bits of these instructions conditional upon the CSR's value. From a higher level, SYS_SD_WRITE and SYS_SD_READ depend on a custom assembly function that switches the CSR, performs the load or store with the RAM and SD block addresses, switches the CSR back to 0, and returns. They both work this way, and that is why they are mentioned in the same section.
+	
 
 SYSOPEN AND SYSCLOSE
 
@@ -150,3 +177,63 @@ SYSEXECVE AND SYSEXIT
 	
 	Sys_execve is used for starting user programs. It is called from the shell. It starts with an argv parsing function that turns the input from the shell into an array that is pointed to. Since the first argument is the name of user program, it is passed into a function that searches the directory table for a program with the name that matches. A directory table index is returned, and the associated starting memory address is put into the sepc. Execve is special among the platform's syscalls because it does not return to where it was called from, and it passes argc and argv into the user program.
 	Sys_exit is very simple. Its purpose is to stop the execution of the user program and return to the shell. It loads sepc with the address of the beginning of the shell function, clears all of the registers, and issues sret, which launches the shell.
+	
+	
+APPENDIX - SD CARD PROCESS
+--------------------------
+
+In this appendix, the process used by MRV32 for initializing and transferring data to and from an SD card with be explained from beginning to end in detail.
+
+First, it is necessary to know the commands used in the initialization and transfer process. These are as follows:
+
+CMD_0	-	0x400000000095
+CMD_8	-	0x48000001AA87
+CMD_55	-	0x7700000000FF
+ACMD_41	-	0x694000000077
+CMD_58	-	0x7A00000000FD
+CMD_24	-	0x58xxxxxxxxFF	x - block address for single block write
+CMD_17	-	0x51xxxxxxxxFF	x - block address for single block read
+
+Initialization-
+	
+	-start sclk out at between 100 and 400 kHz
+	-Wait 1ms with power on the card
+	-Send at least 74 dummy clocks (0xFFs)
+	-Bring cs low
+	-Send CMD_0
+	-Send 0xFFs until you get 0x01 back
+	-Send 6 0xFFs
+	-Send CMD_8
+	-Send 0xFFs while you wait for 0x01000001AA on miso
+	-Send 3 0xFFs
+	-Send CMD_55
+	-Send 0xFFs until you get 0x01 back
+	-Send 3 0xFFs
+	-Send ACMD_41
+	-Send 0xFFs until you get 0x00 back
+	-Increase sclk to 10 MHz and raise cs
+	
+Single Block Write-
+
+	-Bring cs low
+	-Send 3 0xFFs
+	-Send CMD_24
+	-Send 0xFFs until you get 0x00 back
+	-Send 0xFF
+	-Send 0xFE
+	-Send 512 bytes of data
+	-Send 3 0xFFs
+	-If the last 3 response bits are 101, the transfer was successful
+	-Send 0xFF
+	-If the last response bit is 1, then bring cs high and send an 0xFF to finish the write
+	
+Single Block Read-
+
+	-Bring cs low 
+	-Send 4 0xFFs
+	-Send CMD_17
+	-Send 0xFF until you get 0x00 back
+	-Send 0xFF until you get 0xFE back
+	-Send 0xFFs until you have read 512 bytes
+	-raise cs
+
