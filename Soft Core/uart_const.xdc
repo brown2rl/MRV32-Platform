@@ -43,7 +43,7 @@ set_property -dict {PACKAGE_PIN U3 IOSTANDARD LVCMOS33} [get_ports out11]
 set_property -dict {PACKAGE_PIN P3 IOSTANDARD LVCMOS33} [get_ports out12]
 set_property -dict {PACKAGE_PIN N3 IOSTANDARD LVCMOS33} [get_ports out13]
 set_property -dict {PACKAGE_PIN P1 IOSTANDARD LVCMOS33} [get_ports out14]
-set_property -dict {PACKAGE_PIN L1 IOSTANDARD LVCMOS33} [get_ports out15]
+set_property -dict {PACKAGE_PIN L1 IOSTANDARD LVCMOS33} [get_ports ss]
 
 
 ##7 Segment Display
@@ -81,15 +81,22 @@ set_property -dict {PACKAGE_PIN T17 IOSTANDARD LVCMOS33} [get_ports in0]
 #set_property -dict { PACKAGE_PIN H2   IOSTANDARD LVCMOS33 } [get_ports {JA[6]}];#Sch name = JA9
 #set_property -dict { PACKAGE_PIN G3   IOSTANDARD LVCMOS33 } [get_ports {JA[7]}];#Sch name = JA10
 
-##Pmod Header JB
-#set_property -dict { PACKAGE_PIN A14   IOSTANDARD LVCMOS33 } [get_ports {JB[0]}];#Sch name = JB1
-#set_property -dict { PACKAGE_PIN A16   IOSTANDARD LVCMOS33 } [get_ports {JB[1]}];#Sch name = JB2
-#set_property -dict { PACKAGE_PIN B15   IOSTANDARD LVCMOS33 } [get_ports {JB[2]}];#Sch name = JB3
-#set_property -dict { PACKAGE_PIN B16   IOSTANDARD LVCMOS33 } [get_ports {JB[3]}];#Sch name = JB4
-#set_property -dict { PACKAGE_PIN A15   IOSTANDARD LVCMOS33 } [get_ports {JB[4]}];#Sch name = JB7
-#set_property -dict { PACKAGE_PIN A17   IOSTANDARD LVCMOS33 } [get_ports {JB[5]}];#Sch name = JB8
-#set_property -dict { PACKAGE_PIN C15   IOSTANDARD LVCMOS33 } [get_ports {JB[6]}];#Sch name = JB9
-#set_property -dict { PACKAGE_PIN C16   IOSTANDARD LVCMOS33 } [get_ports {JB[7]}];#Sch name = JB10
+## Pmod Header JB (Top Row mapping)
+# Pin 1 - JB1 - Chip Select (Pulled UP)
+set_property PACKAGE_PIN A14 [get_ports cs]
+set_property IOSTANDARD LVCMOS33 [get_ports cs]
+set_property PULLTYPE PULLUP [get_ports cs]
+
+# Pin 2 - JB2 - MOSI (Output)
+set_property -dict {PACKAGE_PIN A16 IOSTANDARD LVCMOS33} [get_ports mosi]
+
+# Pin 3 - JB3 - MISO (Input, Pulled UP)
+set_property PACKAGE_PIN B15 [get_ports miso]
+set_property IOSTANDARD LVCMOS33 [get_ports miso]
+set_property PULLTYPE PULLUP [get_ports miso]
+
+# Pin 4 - JB4 - SCLK (Output)
+set_property -dict {PACKAGE_PIN B16 IOSTANDARD LVCMOS33} [get_ports sclk]
 
 ##Pmod Header JC
 #set_property -dict { PACKAGE_PIN K17   IOSTANDARD LVCMOS33 } [get_ports {JC[0]}];#Sch name = JC1
@@ -150,8 +157,8 @@ set_property -dict {PACKAGE_PIN A18 IOSTANDARD LVCMOS33} [get_ports tx]
 
 
 ## Configuration options, can be used for all designs
-#set_property CONFIG_VOLTAGE 3.3 [current_design]
-#set_property CFGBVS VCCO [current_design]
+set_property CONFIG_VOLTAGE 3.3 [current_design]
+set_property CFGBVS VCCO [current_design]
 
 ## SPI configuration mode options for QSPI boot, can be used for all designs
 #set_property BITSTREAM.GENERAL.COMPRESS TRUE [current_design]
@@ -203,3 +210,56 @@ set_property -dict {PACKAGE_PIN A18 IOSTANDARD LVCMOS33} [get_ports tx]
 #set_property MARK_DEBUG false [get_nets {REG_D[3]}]
 #set_property MARK_DEBUG false [get_nets {REG_D[4]}]
 
+
+
+
+set_property MARK_DEBUG false [get_nets cs_OBUF]
+set_property MARK_DEBUG false [get_nets sclk_OBUF]
+
+
+set_property MARK_DEBUG true [get_nets ss_OBUF]
+
+
+
+
+
+
+
+connect_debug_port u_ila_0/clk [get_nets [list CW1/inst/clk_out1]]
+connect_debug_port u_ila_0/probe3 [get_nets [list ss_OBUF]]
+
+set_property MARK_DEBUG false [get_nets miso_IBUF]
+set_property MARK_DEBUG false [get_nets mosi_OBUF]
+
+
+
+create_debug_core u_ila_0 ila
+set_property ALL_PROBE_SAME_MU true [get_debug_cores u_ila_0]
+set_property ALL_PROBE_SAME_MU_CNT 1 [get_debug_cores u_ila_0]
+set_property C_ADV_TRIGGER false [get_debug_cores u_ila_0]
+set_property C_DATA_DEPTH 65536 [get_debug_cores u_ila_0]
+set_property C_EN_STRG_QUAL false [get_debug_cores u_ila_0]
+set_property C_INPUT_PIPE_STAGES 0 [get_debug_cores u_ila_0]
+set_property C_TRIGIN_EN false [get_debug_cores u_ila_0]
+set_property C_TRIGOUT_EN false [get_debug_cores u_ila_0]
+set_property port_width 1 [get_debug_ports u_ila_0/clk]
+connect_debug_port u_ila_0/clk [get_nets [list CW1/inst/clk_out1]]
+set_property PROBE_TYPE DATA_AND_TRIGGER [get_debug_ports u_ila_0/probe0]
+set_property port_width 1 [get_debug_ports u_ila_0/probe0]
+connect_debug_port u_ila_0/probe0 [get_nets [list miso_IBUF]]
+create_debug_port u_ila_0 probe
+set_property PROBE_TYPE DATA_AND_TRIGGER [get_debug_ports u_ila_0/probe1]
+set_property port_width 1 [get_debug_ports u_ila_0/probe1]
+connect_debug_port u_ila_0/probe1 [get_nets [list sclk_OBUF]]
+create_debug_port u_ila_0 probe
+set_property PROBE_TYPE DATA_AND_TRIGGER [get_debug_ports u_ila_0/probe2]
+set_property port_width 1 [get_debug_ports u_ila_0/probe2]
+connect_debug_port u_ila_0/probe2 [get_nets [list SDC1/ss]]
+create_debug_port u_ila_0 probe
+set_property PROBE_TYPE DATA_AND_TRIGGER [get_debug_ports u_ila_0/probe3]
+set_property port_width 1 [get_debug_ports u_ila_0/probe3]
+connect_debug_port u_ila_0/probe3 [get_nets [list mosi_OBUF]]
+set_property C_CLK_INPUT_FREQ_HZ 300000000 [get_debug_cores dbg_hub]
+set_property C_ENABLE_CLK_DIVIDER false [get_debug_cores dbg_hub]
+set_property C_USER_SCAN_CHAIN 1 [get_debug_cores dbg_hub]
+connect_debug_port dbg_hub/clk [get_nets clk_out1]
