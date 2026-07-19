@@ -1,4 +1,4 @@
-module REGS( clk, indicators, out, spcr, spcrt, sraa, srab, sar, scmr, sramr, scsr, sramrs8, sramrs16, sramrs32, sramru8, sramru16, REGS_UART, UART_REGS, PC_REGS, REGS_PC, CM_REGS, REGS_CM, RAM_REGS, REGS_RAM, CSR_REGS, REGS_CSR, REGS_MAR, REGS_ALU_A, REG_A, REG_B, REG_D, REGS_ALU_B, ALU_REGS);
+module REGS( clk, indicators, out, spcr, spcrt, sraa, srab, sar, scmr, sramr, scsr, sramrs8, sramrs16, sramrs32, sramru8, sramru16, REGS_SAR, REGS_UART, UART_REGS, PC_REGS, REGS_PC, CM_REGS, REGS_CM, RAM_REGS, REGS_RAM, CSR_REGS, REGS_CSR, REGS_MAR, REGS_ALU_A, REG_A, REG_B, REG_D, REGS_ALU_B, ALU_REGS);
     
 input clk, indicators;
 input spcr, spcrt, sraa, srab, sar, scmr, sramr, scsr;
@@ -11,7 +11,7 @@ input [4:0]  REG_A, REG_B, REG_D;
 output reg out;
 output [7:0]  REGS_UART;
 output [31:0] REGS_PC, REGS_CM, REGS_RAM, REGS_CSR;
-output [31:0] REGS_MAR, REGS_ALU_A, REGS_ALU_B;
+output [31:0] REGS_MAR, REGS_SAR, REGS_ALU_A, REGS_ALU_B;
 
 (* ram_style = "registers" *)
 reg [31:0] regs [0:31];
@@ -94,5 +94,6 @@ assign REGS_CM    = regs[REG_A];
 assign REGS_RAM   = regs[REG_B];
 assign REGS_CSR   = regs[REG_A];
 assign REGS_MAR   = regs[REG_A];
+assign REGS_SAR   = regs[REG_B];
 
 endmodule

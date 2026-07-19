@@ -1,14 +1,14 @@
-module CM(clk, rst, tu, restu, ecall, sret, mret, rxinterrupt, tx_int_ack, pc, bacm, stucsrpc, pcpi, ipc, mpi, rpi, scmcsi, scmcst, scmpc, jalr, cur, smi, spm, srm, crm, sri, spcr, spcrt, srpc, spca, sraa, srab, sar, scmr, srcm, srram, srr8, srr16, srr32, sramrs8, sramrs16, sramrs32, sramru8, sramru16, scsr, srcs, spcs, scsp, scmcs, csbmr, csbmi, csor, csori, csan, csrl, csani, smrar, scma, scmau, stupc, ALU_OP, CM_PC, IR_CM, REGS_CM, CM_REGS, REG_A, REG_B, REG_D, CM_ALU, ALU_CM, CM_CSR, CM_CSRI, CM_CSRT, CM_MAR);
+module CM(clk, rst, tu, restu, ecall, sret, mret, rxinterrupt, tx_int_ack, sdrs, sdrd, sdws, sdwd, srs, pc, bacm, stucsrpc, pcpi, ipc, mpi, rpi, scmcsi, scmcst, scmpc, jalr, cur, smi, spm, srm, crm, sri, spcr, spcrt, srpc, spca, sraa, srab, sar, scmr, srcm, srram, srr8, srr16, srr32, sramrs8, sramrs16, sramrs32, sramru8, sramru16, scsr, srcs, spcs, scsp, scmcs, csbmr, csbmi, csor, csori, csan, csrl, csani, smrar, scma, scmau, stupc, ALU_OP, CM_PC, IR_CM, REGS_CM, CM_REGS, REG_A, REG_B, REG_D, CM_ALU, ALU_CM, CM_CSR, CM_CSRI, CM_CSRT, CM_MAR, CSR_DEV_SEL);
 
-input clk, rst, bacm, stucsrpc, stupc, rxinterrupt, tx_int_ack;
-input[31:0] IR_CM, REGS_CM, ALU_CM;
+input clk, rst, bacm, stucsrpc, stupc, rxinterrupt, tx_int_ack, sdrd, sdwd;
+input[31:0] IR_CM, REGS_CM, ALU_CM, CSR_DEV_SEL;
 output reg[31:0] CM_REGS, CM_CSRI, CM_CSRT;
 output reg[11:0] CM_CSR;
 output reg[19:0] CM_PC;
 output reg[31:0] CM_MAR;
 output reg[31:0] CM_ALU;
 output reg[4:0] REG_A, REG_B, REG_D, ALU_OP;
-output reg tu, restu, ecall, sret, mret, pc, pcpi, mpi, rpi, ipc, scmcsi, scmcst, scmpc, jalr, cur, smi, spm, srm, crm, sri, spcr, spcrt, srpc, spca, sraa, srab, sar, scmr, srcm, srram, srr8, srr16, srr32, sramrs8, sramrs16, sramrs32, sramru8, sramru16, scsr, srcs, spcs, scsp, scmcs, csbmr, csbmi, csor, csori, csan, csrl, csani, smrar, scma, scmau;
+output reg tu, restu, ecall, sret, mret, sdrs, sdws, srs, pc, pcpi, mpi, rpi, ipc, scmcsi, scmcst, scmpc, jalr, cur, smi, spm, srm, crm, sri, spcr, spcrt, srpc, spca, sraa, srab, sar, scmr, srcm, srram, srr8, srr16, srr32, sramrs8, sramrs16, sramrs32, sramru8, sramru16, scsr, srcs, spcs, scsp, scmcs, csbmr, csbmi, csor, csori, csan, csrl, csani, smrar, scma, scmau;
 wire[31:0] instruction;
 reg[5:0] T;
 reg[16:0] scounter;
@@ -128,6 +128,10 @@ else if (tx_int_ack)
 begin
     	T <= 0;
     	wfi <= 0;
+end
+else if (wfi && (sdrd || sdwd))
+begin
+    wfi <= 0;
 end
 else if (!wfi)
 begin
@@ -1623,7 +1627,7 @@ begin
 			end
 			
 			//lbu
-			if (instruction[14:12] == 3'b100)
+			if (instruction[14:12] == 3'b100 && CSR_DEV_SEL == 0)
 			begin
 				
 				
@@ -1664,6 +1668,42 @@ begin
 				if (T >= 9)
 				begin
 					crm <= 1;
+					pc <= 1;
+					T <= 0;
+				end
+			end
+			else if (instruction[14:12] == 3'b100 && CSR_DEV_SEL == 1)
+			begin
+				
+				REG_A <= instruction[19:15];
+				REG_B <= instruction[11:7];
+				sri <= 0;
+				srm <= 0;
+				srs <= 0;
+				crm <= 0;
+				pc <= 0;
+				rpi <= 0;
+				cur <= 0;
+				sdrs <= 0;
+								
+				if (T == 4)
+				begin
+					srm <= 1;
+					srs <= 1;
+				end	
+				
+				if (T == 6)
+				begin
+				    sdrs <= 1;
+				end
+				
+				if (T == 7)
+				begin
+				    wfi <= 1;
+				end
+				
+				if (T >= 8)
+				begin
 					pc <= 1;
 					T <= 0;
 				end
@@ -1715,7 +1755,7 @@ begin
 		begin
 			
 			//sb
-			if (instruction[14:12] == 3'b000)
+			if (instruction[14:12] == 3'b000 && CSR_DEV_SEL == 0)
 			begin
 				
 				REG_B <= instruction[24:20];
@@ -1757,6 +1797,40 @@ begin
 				begin
 					T <= 0;
 					crm <= 1;
+					pc <= 1;
+				end
+			
+			end
+			else if (instruction[14:12] == 3'b000 && CSR_DEV_SEL == 1)
+			begin
+				
+				REG_B <= instruction[24:20];
+				REG_A <= instruction[19:15];
+				CM_MAR <= { {20{instruction[31]}}, instruction[31:25] , instruction[11:7] };
+                pc <= 0;
+				srm <= 0;
+				srs <= 0;
+				sdws <= 0;
+                		
+                if (T == 4)	
+				begin
+				    srm <= 1;
+				    srs <= 1;
+				end
+                		
+                if (T == 6)	
+				begin
+				    sdws <= 1;
+				end
+				
+				if (T == 7)
+				begin
+				    wfi <= 1;
+				end
+			
+				if (T >= 8)
+				begin
+					T <= 0;
 					pc <= 1;
 				end
 			
@@ -1911,7 +1985,6 @@ begin
 			if (T == 4)
 			begin
 				spcrt <= 1;
-				
 			end
 
 			if (T == 5)
