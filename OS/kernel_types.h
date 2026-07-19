@@ -15,6 +15,8 @@
 #define FT_TTY  2
 
 #define SYS_WRITE 	6
+#define SYS_SD_READ	7
+#define SYS_SD_WRITE	8
 #define SYS_READ  	5
 #define SYS_EXECVE 	1
 #define SYS_EXIT  	2

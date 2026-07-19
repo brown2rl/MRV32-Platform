@@ -56,6 +56,34 @@ static inline long sys_read(int fd, char *buf, int count)
     return a0;
 }
 
+static inline long sys_sd_read(char *buf, int block)
+{
+    register char *a0 __asm__("a0") = buf;
+    register int   a1 __asm__("a1") = block;
+    register int   a7 __asm__("a7") = 7;
+    __asm__ volatile (
+        "ecall"
+        : "+r"(a0)
+        : "r"(a1), "r"(a7)
+        : "memory"
+    );
+    return (int)a0;
+}
+
+static inline long sys_sd_write(char *buf, int block)
+{
+    register char *a0 __asm__("a0") = buf;
+    register int   a1 __asm__("a1") = block;
+    register int   a7 __asm__("a7") = 8;
+    __asm__ volatile (
+        "ecall"
+        : "+r"(a0)
+        : "r"(a1), "r"(a7)
+        : "memory"
+    );
+    return (int)a0;
+}
+
 static inline int sys_open(const char *filename, int append, int create_flag)
 {
     register const char *a0 __asm__("a0") = filename;

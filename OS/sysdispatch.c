@@ -1,9 +1,10 @@
 #include "kernel_types.h"
 
-//extern int bread_crumb_digit(int digit);
 extern context_t ctx;
 extern ssize_t syswrite( int fd, const char *buf, int size);
 extern ssize_t sysread(int fd, char *buf, int count, int raw_flag);
+extern ssize_t sys_sd_read(char *arg0, int arg1);
+extern ssize_t sys_sd_write(char *arg0, int arg1);
 extern int sysexecve(char *argv);
 extern ssize_t sysexit();
 extern ssize_t sysopen(const char *filename, int append, int create_flag);
@@ -26,6 +27,12 @@ void sys_dispatch(context_t *ctx) {
             break;
         case SYS_READ:
             ret = sysread( arg0, (char *)arg1, arg2, arg3);
+            break;
+        case SYS_SD_READ:
+            ret = sys_sd_read((char *)arg0, arg1);
+            break;
+        case SYS_SD_WRITE:
+            ret = sys_sd_write((char *)arg0, arg1);
             break;
         case SYS_EXECVE:
             ret = sysexecve((char *)arg0);
