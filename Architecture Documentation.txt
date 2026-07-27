@@ -1,4 +1,5 @@
 This document explains the platform’s hardware, software, and their inner workings.
+(Last revised: July 18, 2026)
 
 
 HARDWARE ARCHITECTURE
