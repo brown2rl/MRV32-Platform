@@ -1,13 +1,13 @@
-module SD_Controller(clk, reset, ss, start, tx_byte, sdc_wirq_en, sdc_rirq_en, srr8, srr32, sdrs, sdrd, sdws, sdwd, next_read_address, next_write_address, cs_en, clk_on, clk_cnt, rx_byte, busy, done, card_busy, sd_read_interrupt, sd_write_interrupt, DEV_SDC, SDC_RAM, RAM_SDC, MAR_DEV, SAR_SDC);
+module SD_Controller(clk, reset, ss, start, tx_byte, sdc_wirq_en, sdc_rirq_en, srr8, srr32, next_read_address, next_write_address, cs_en, clk_on, clk_cnt, rx_byte, busy, done, card_busy, sd_read_interrupt, sd_write_interrupt, SDC_DEV, DEV_SDC, RAM_SDC, MAR_DEV, SAR_SDC, sdccontin, sdccontout, CSR_DEV_BUS_IN, CSR_DEV_BUS_OUT);
 
-    input clk, busy, done, reset, sdc_wirq_en, sdc_rirq_en, sd_read_interrupt, sd_write_interrupt, srr8, srr32, sdrs, sdws;
-    input [7:0] rx_byte, DEV_SDC, MAR_DEV, RAM_SDC;
-    input [31:0] SAR_SDC;
-    output reg start, cs_en, ss, clk_on, card_busy, sdrd, sdwd, next_read_address, next_write_address;
-    output reg [7:0] tx_byte, SDC_RAM;
+    input clk, busy, done, reset, sdc_wirq_en, sdc_rirq_en, sd_read_interrupt, sd_write_interrupt, srr8, srr32;
+    input [7:0] rx_byte, DEV_SDC, MAR_DEV, RAM_SDC, sdccontout;
+    input [31:0] SAR_SDC, CSR_DEV_BUS_IN, CSR_DEV_BUS_OUT;
+    output reg start, cs_en, ss, clk_on, card_busy, next_read_address, next_write_address;
+    output reg [7:0] tx_byte, sdccontin, SDC_DEV;
     output reg [15:0] clk_cnt;
 
-    reg rst_reg, ready_state, start_level;
+    reg rst_reg, ready_state, start_level, address_progression, sdws, sdwd, sdrs, sdrd;
     reg [4:0] init_state, card_on_state, write_state, read_state;
     reg [5:0] intra_state;
     reg [18:0] cnt;
@@ -27,6 +27,10 @@ module SD_Controller(clk, reset, ss, start, tx_byte, sdc_wirq_en, sdc_rirq_en, s
     initial
     begin
         start       = 0;
+        sdrs        = 0;
+        sdws        = 0;
+        sdrd        = 0;
+        sdwd        = 0;
         cs_en       = 1;
         clk_on      = 1;
         tx_byte     = 0;
@@ -62,7 +66,7 @@ module SD_Controller(clk, reset, ss, start, tx_byte, sdc_wirq_en, sdc_rirq_en, s
 
     always @(posedge clk)
     begin
-        if (read_state == 4)
+        if (write_state == 3 && intra_state == 4)
         begin
             ss <= 1;
         end
@@ -74,6 +78,33 @@ module SD_Controller(clk, reset, ss, start, tx_byte, sdc_wirq_en, sdc_rirq_en, s
     
     assign write_address = SAR_SDC;
     assign read_address = SAR_SDC;
+
+always @*
+if (CSR_DEV_BUS_IN == 1 && CSR_DEV_BUS_OUT == 3)
+begin
+	sdws = sdccontout[0];
+end
+
+always @*
+if (CSR_DEV_BUS_IN == 3 && CSR_DEV_BUS_OUT == 1)
+begin
+	sdrs = sdccontout[0];
+end
+
+always @*
+begin
+    if (CSR_DEV_BUS_IN == 1 && CSR_DEV_BUS_OUT == 3)
+    begin
+	   sdccontin[0] = address_progression;
+	   sdccontin[1] = sdwd;
+    end
+    else if (CSR_DEV_BUS_IN == 3 && CSR_DEV_BUS_OUT == 1)
+    begin
+	   sdccontin[0] = address_progression;
+	   sdccontin[1] = sdrd;
+    end
+end
+
 
     always @(posedge clk)
     begin
@@ -657,17 +688,17 @@ module SD_Controller(clk, reset, ss, start, tx_byte, sdc_wirq_en, sdc_rirq_en, s
                 else if (intra_state == 6 && (done || cnt > 0))
                 begin
                     intra_state <= 7;
-                    tx_byte     <= RAM_SDC;
+                    tx_byte     <= DEV_SDC;
                 end
                 else if (intra_state == 7)
                 begin
-                    next_write_address   <= 1;
+                    address_progression   <= 1;
                     start       <= 1;
                     intra_state <= 8;
                 end
                 else if (intra_state == 8)
                 begin
-                    next_write_address   <= 0;
+                    address_progression   <= 0;
                     start       <= 0;
                     intra_state <= 9;
                 end
@@ -934,7 +965,7 @@ module SD_Controller(clk, reset, ss, start, tx_byte, sdc_wirq_en, sdc_rirq_en, s
                 begin
                     start       <= 1;
                     intra_state <= 2;
-                    next_read_address <= 0;
+                    address_progression <= 0;
                 end
                 else if (intra_state == 2)
                 begin
@@ -943,23 +974,67 @@ module SD_Controller(clk, reset, ss, start, tx_byte, sdc_wirq_en, sdc_rirq_en, s
                 end
                 else if (intra_state == 3 && done)
                 begin
+                    SDC_DEV <= rx_byte;
+                    intra_state <= 4;
+                end
+                else if (intra_state == 4)
+                begin
                     if (cnt < 511)
                     begin
-                        next_read_address <= 1;
+                        address_progression <= 1;
                         cnt         <= cnt + 1;
                         intra_state <= 1;
-                        SDC_RAM <= rx_byte;
                     end
                     else
                     begin
-                        read_state  <= 0;
-                        sdrd <= 1;
-                        intra_state <= 0;
+                        address_progression <= 1;
+                        intra_state <= 5;
                         cnt         <= 0;
-                        SDC_RAM <= rx_byte;
-                        next_read_address <= 1;
-                        cs_en       <= 1;
                     end
+                end
+                else if (intra_state == 5)
+                begin
+                    address_progression <= 0;
+                    tx_byte     <= 8'hFF;
+                    cnt         <= 0;
+                    intra_state <= 6;
+                end
+                else if (intra_state == 6)
+                begin
+                    start       <= 1;
+                    intra_state <= 7;
+                end
+                else if (intra_state == 7)
+                begin
+                    start       <= 0;
+                    intra_state <= 8;
+                end
+                else if (intra_state == 8 && done)
+                begin
+                    start       <= 1;
+                    intra_state <= 9;
+                end
+                else if (intra_state == 9)
+                begin
+                    start       <= 0;
+                    intra_state <= 10;
+                end
+                else if (intra_state == 10 && done)
+                begin
+                    start       <= 1;
+                    intra_state <= 11;
+                end
+                else if (intra_state == 11)
+                begin
+                    start       <= 0;
+                    intra_state <= 12;
+                end
+                else if (intra_state == 12 && done)
+                begin
+                    read_state <= 0;
+                    intra_state <= 0;
+                    cs_en <= 1;
+                    sdrd <= 1;
                 end
             end
         end
