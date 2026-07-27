@@ -45,13 +45,6 @@ void set_mtvec(void (*mtvec)(void)) {
     );
 }
 
-void set_txvec(void (*txvec)(void)) {
-    asm volatile(
-        ".insn i 0x73, 0x1, x0, %0, 0x7C0"
-        :
-        : "r"(txvec)
-    );
-}
 
 void set_rxvec(void (*rxvec)(void)) {
     asm volatile(
@@ -66,8 +59,7 @@ void boot() {
     	while (p < &_bss_end) *p++ = 0;
     	
     	set_mtvec(trap_entry);
-    	set_txvec(write_handler + 32);
-    	set_rxvec(read_handler + 44);
+    	set_rxvec(read_handler + 24);
     	
     
     	for (int i = 0; i < MAX_FDS; i++) {
