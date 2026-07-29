@@ -779,10 +779,17 @@ int editorOpen(char *filename) {
 
     int fd = open(filename, 0);
     if (fd < 0) {
-        if (errno != ENOENT) {
-            perror("Opening file");
-        }
-        return 1; /* New file, that's ok. */
+        /* RISCVRAM: the kernel signals failure with a generic negative value
+         * rather than -errno, so minilib's open() cannot produce a truthful
+         * ENOENT and we cannot tell "does not exist" from any other error.
+         *
+         * Treat every failure as "new file" -- the normal case on a fresh RAM
+         * filesystem -- and report it through the status bar (see main()).
+         * The old code called perror() here, which was doubly useless: the
+         * message said "Unknown error" because strerror() knows only four
+         * codes, and the first screen repaint erased it anyway. */
+        E.dirty = 0;
+        return 1;
     }
 
     /* Read entire file into memory.  We grow the buffer as needed. */
@@ -853,157 +860,396 @@ writeerr:
     return 1;
 }
 
-/* ============================= Terminal update ============================ */
+/* ============================= Terminal update ============================
+ *
+ * RISCVRAM: Differential (incremental) screen updates, low-memory version.
+ *
+ * The original kilo redrew the whole screen on every keypress: ~2-3 KB of
+ * text and escape sequences per keystroke.  Instead we keep a "shadow" copy
+ * of what the terminal is believed to be displaying, rebuild each row on
+ * demand, and emit only the cells that actually differ.
+ *
+ * MEMORY.  An earlier version of this kept two full screen buffers, which
+ * cost 16.9 KB of .bss -- far too much to sit alongside minilib's 32 KB
+ * heap on a RAM-resident kernel, and enough to collide with the stack or
+ * the kernel itself on a machine with a fixed load region.  Only the shadow
+ * has to be screen-sized: the desired image is built one row at a time into
+ * fb_row, diffed, emitted, and then folded into the shadow.  Total cost is
+ * now about 4.3 KB:
+ *
+ *     fb_shadow   KILO_MAX_ROWS * KILO_MAX_COLS * 2  =  3840 bytes
+ *     fb_row      KILO_MAX_COLS * 2                  =   160 bytes
+ *     obuf        OBUF_SIZE                          =   256 bytes
+ *
+ * If it still does not fit, shrink KILO_MAX_COLS/ROWS to your real terminal
+ * size -- they only need to be as large as the screen you actually drive.
+ *
+ * ZERO-INITIALISED STATE.  Every variable below is designed so that
+ * all-bits-zero means "I know nothing, repaint everything".  Nothing here
+ * relies on a non-zero initialiser, so the editor starts correctly even if
+ * the loader sets up .bss but not .data.
+ */
 
-/* We define a very simple "append buffer" structure, that is an heap
- * allocated string where we can append to. This is useful in order to
- * write all the escape sequences in a buffer and flush them to the standard
- * output in a single call, to avoid flickering effects. */
-struct abuf {
-    char *b;
-    int len;
-};
+#define KILO_MAX_ROWS 24      /* Must be >= real terminal rows. */
+#define KILO_MAX_COLS 80      /* Must be >= real terminal columns. */
 
-#define ABUF_INIT {NULL,0}
+/* Cell attribute byte: low 7 bits = SGR color (39 == terminal default),
+ * high bit = reverse video. */
+#define ATTR_REVERSE  0x80
+#define ATTR_COLOR    0x7f
+#define COLOR_DEFAULT 39
+#define ATTR_UNKNOWN  0xff
 
-void abAppend(struct abuf *ab, const char *s, int len) {
-    char *new = realloc(ab->b,ab->len+len);
+typedef struct scell {
+    unsigned char c;     /* Character to display. */
+    unsigned char attr;  /* Color + reverse-video flag. */
+} scell;
 
-    if (new == NULL) return;
-    memcpy(new+ab->len,s,len);
-    ab->b = new;
-    ab->len += len;
+static scell fb_shadow[KILO_MAX_ROWS][KILO_MAX_COLS];  /* Believed on screen. */
+static scell fb_row[KILO_MAX_COLS];                    /* Row being built. */
+
+static int fb_ready;         /* 0 = shadow unknown, repaint everything. */
+static int fb_cursor_known;  /* 0 = cursor position unknown. */
+static int fb_cursor_row;
+static int fb_cursor_col;
+
+/* Throw away what we believe about the screen and repaint from scratch. */
+void editorForceRedraw(void) {
+    fb_ready = 0;
+    fb_cursor_known = 0;
 }
 
-void abFree(struct abuf *ab) {
-    free(ab->b);
+/* ---- Output buffer ------------------------------------------------------
+ *
+ * How we are allowed to talk to the kernel's write syscall:
+ *
+ *   KILO_WRITE_CHUNK
+ *       Max bytes handed to sys_write in one call.  minilib's write() uses
+ *       8, which is a good hint about the UART FIFO, so we match it.
+ *
+ *   KILO_WRITE_RETURNS_COUNT
+ *       Your syscall convention documents a0 as "arg1 (and return value)",
+ *       so a write handler that never sets a0 leaves the fd sitting there
+ *       and appears to "return" 1 regardless of what it wrote.  Until that
+ *       is confirmed the return value cannot be trusted, so we default to
+ *       ignoring it -- exactly what the original kilo did.  Set this to 1
+ *       only if probe.c test [1] shows a real byte count.
+ */
+#define KILO_WRITE_CHUNK         8
+#define KILO_WRITE_RETURNS_COUNT 0
+#define OBUF_SIZE                256
+
+static char obuf[OBUF_SIZE];
+static int  obuf_len;
+
+static void obFlush(void) {
+    int off = 0;
+    while (off < obuf_len) {
+        int chunk = obuf_len - off;
+        if (chunk > KILO_WRITE_CHUNK) chunk = KILO_WRITE_CHUNK;
+#if KILO_WRITE_RETURNS_COUNT
+        {
+            long ret = sys_write(STDOUT_FILENO, obuf + off, chunk);
+            if (ret <= 0) break;        /* Refused: stop, resync via Ctrl-L. */
+            off += (int)ret;
+        }
+#else
+        sys_write(STDOUT_FILENO, obuf + off, chunk);
+        off += chunk;                   /* Fire and forget. */
+#endif
+    }
+    obuf_len = 0;
 }
 
-/* This function writes the whole screen using VT100 escape characters
- * starting from the logical state of the editor in the global state 'E'. */
-void editorRefreshScreen(void) {
-    int y;
-    erow *r;
-    char buf[32];
-    struct abuf ab = ABUF_INIT;
+static void obAppend(const char *s, int len) {
+    while (len > 0) {
+        int space = OBUF_SIZE - obuf_len;
+        int n;
+        if (space == 0) {
+            obFlush();
+            space = OBUF_SIZE;
+        }
+        n = (len < space) ? len : space;
+        memcpy(obuf + obuf_len, s, n);
+        obuf_len += n;
+        s += n;
+        len -= n;
+    }
+}
 
-    abAppend(&ab,"\x1b[?25l",6); /* Hide cursor. */
-    abAppend(&ab,"\x1b[H",3); /* Go home. */
-    for (y = 0; y < E.screenrows; y++) {
-        int filerow = E.rowoff+y;
+static void obAppendStr(const char *s) {
+    obAppend(s, strlen(s));
+}
+
+/* ---- Geometry ----------------------------------------------------------- */
+
+/* Total rows we manage: text area plus the two status rows. */
+static int fbTotalRows(void) {
+    int r = E.screenrows + 2;
+    if (r > KILO_MAX_ROWS) r = KILO_MAX_ROWS;
+    if (r < 0) r = 0;
+    return r;
+}
+
+/* Usable columns on screen row 'y'.  We never touch the very last cell of
+ * the very last row: writing there triggers auto-wrap (and a scroll) on
+ * most terminals, which would shift the display out from under us. */
+static int fbRowWidth(int y) {
+    int w = E.screencols;
+    if (w > KILO_MAX_COLS) w = KILO_MAX_COLS;
+    if (y == fbTotalRows() - 1) w--;
+    if (w < 0) w = 0;
+    return w;
+}
+
+/* ---- Row painting ------------------------------------------------------- */
+
+static void rowSet(int x, int w, unsigned char c, unsigned char attr) {
+    if (x >= 0 && x < w && x < KILO_MAX_COLS) {
+        fb_row[x].c = c;
+        fb_row[x].attr = attr;
+    }
+}
+
+/* Build screen row 'y' into fb_row.  Pure memory work: no syscalls, no
+ * allocation, and no second screen-sized buffer. */
+static void fbRenderRow(int y, int w) {
+    int x, j;
+
+    for (x = 0; x < KILO_MAX_COLS; x++) {
+        fb_row[x].c = ' ';
+        fb_row[x].attr = COLOR_DEFAULT;
+    }
+
+    /* --- Text area --- */
+    if (y < E.screenrows) {
+        int filerow = E.rowoff + y;
+        erow *r;
+        int len;
 
         if (filerow >= E.numrows) {
-            if (E.numrows == 0 && y == E.screenrows/3) {
+            if (E.numrows == 0 && y == E.screenrows / 3) {
                 char welcome[80];
-                int welcomelen = snprintf(welcome,sizeof(welcome),
-                    "Kilo editor -- verison %s\x1b[0K\r\n", KILO_VERSION);
-                int padding = (E.screencols-welcomelen)/2;
-                if (padding) {
-                    abAppend(&ab,"~",1);
+                int welcomelen = snprintf(welcome, sizeof(welcome),
+                    "Kilo editor -- version %s", KILO_VERSION);
+                int padding = (E.screencols - welcomelen) / 2;
+                x = 0;
+                if (padding > 0) {
+                    rowSet(x++, w, '~', COLOR_DEFAULT);
                     padding--;
                 }
-                while(padding--) abAppend(&ab," ",1);
-                abAppend(&ab,welcome,welcomelen);
+                while (padding-- > 0 && x < w) x++;   /* Already blank. */
+                for (j = 0; j < welcomelen && x < w; j++)
+                    rowSet(x++, w, (unsigned char)welcome[j], COLOR_DEFAULT);
             } else {
-                abAppend(&ab,"~\x1b[0K\r\n",7);
+                rowSet(0, w, '~', COLOR_DEFAULT);
             }
-            continue;
+            return;
         }
 
         r = &E.row[filerow];
-
-        int len = r->rsize - E.coloff;
-        int current_color = -1;
+        len = r->rsize - E.coloff;
         if (len > 0) {
-            if (len > E.screencols) len = E.screencols;
-            char *c = r->render+E.coloff;
-            unsigned char *hl = r->hl+E.coloff;
-            int j;
-            for (j = 0; j < len; j++) {
-                if (hl[j] == HL_NONPRINT) {
+            char *c = r->render + E.coloff;
+            unsigned char *hl = r->hl + E.coloff;
+            if (len > w) len = w;
+            for (x = 0; x < len; x++) {
+                if (hl[x] == HL_NONPRINT) {
                     char sym;
-                    abAppend(&ab,"\x1b[7m",4);
-                    if (c[j] <= 26)
-                        sym = '@'+c[j];
+                    if (c[x] <= 26)
+                        sym = '@' + c[x];
                     else
                         sym = '?';
-                    abAppend(&ab,&sym,1);
-                    abAppend(&ab,"\x1b[0m",4);
-                } else if (hl[j] == HL_NORMAL) {
-                    if (current_color != -1) {
-                        abAppend(&ab,"\x1b[39m",5);
-                        current_color = -1;
-                    }
-                    abAppend(&ab,c+j,1);
+                    rowSet(x, w, (unsigned char)sym,
+                           COLOR_DEFAULT | ATTR_REVERSE);
+                } else if (hl[x] == HL_NORMAL) {
+                    rowSet(x, w, (unsigned char)c[x], COLOR_DEFAULT);
                 } else {
-                    int color = editorSyntaxToColor(hl[j]);
-                    if (color != current_color) {
-                        char buf[16];
-                        int clen = snprintf(buf,sizeof(buf),"\x1b[%dm",color);
-                        current_color = color;
-                        abAppend(&ab,buf,clen);
-                    }
-                    abAppend(&ab,c+j,1);
+                    rowSet(x, w, (unsigned char)c[x],
+                           (unsigned char)editorSyntaxToColor(hl[x]));
                 }
             }
         }
-        abAppend(&ab,"\x1b[39m",5);
-        abAppend(&ab,"\x1b[0K",4);
-        abAppend(&ab,"\r\n",2);
+        return;
     }
-    /* Create a two rows status. First row: */
-    abAppend(&ab,"\x1b[0K",4);
-    abAppend(&ab,"\x1b[7m",4);
-    char status[80], rstatus[80];
-    int len = snprintf(status, sizeof(status), "%.20s - %d lines %s",
-        E.filename, E.numrows, E.dirty ? "(modified)" : "");
-    int rlen = snprintf(rstatus, sizeof(rstatus),
-        "%d/%d",E.rowoff+E.cy+1,E.numrows);
-    if (len > E.screencols) len = E.screencols;
-    abAppend(&ab,status,len);
-    while(len < E.screencols) {
-        if (E.screencols - len == rlen) {
-            abAppend(&ab,rstatus,rlen);
-            break;
-        } else {
-            abAppend(&ab," ",1);
-            len++;
+
+    /* --- Status row (reverse video) --- */
+    if (y == E.screenrows) {
+        unsigned char a = COLOR_DEFAULT | ATTR_REVERSE;
+        char status[80], rstatus[80];
+        int len = snprintf(status, sizeof(status), "%.20s - %d lines %s",
+            E.filename, E.numrows, E.dirty ? "(modified)" : "");
+        int rlen = snprintf(rstatus, sizeof(rstatus),
+            "%d/%d", E.rowoff + E.cy + 1, E.numrows);
+        int rstart;
+
+        for (x = 0; x < w; x++) rowSet(x, w, ' ', a);
+        for (x = 0; x < len && x < w; x++)
+            rowSet(x, w, (unsigned char)status[x], a);
+
+        rstart = E.screencols - rlen;
+        if (rstart < len) rstart = len;   /* Never overlap the left status. */
+        for (x = 0; x < rlen && rstart + x < w; x++)
+            rowSet(rstart + x, w, (unsigned char)rstatus[x], a);
+        return;
+    }
+
+    /* --- Message row --- */
+    {
+        int msglen = strlen(E.statusmsg);
+        if (msglen && time(NULL) - E.statusmsg_time < 5) {
+            for (x = 0; x < msglen && x < w; x++)
+                rowSet(x, w, (unsigned char)E.statusmsg[x], COLOR_DEFAULT);
         }
     }
-    abAppend(&ab,"\x1b[0m\r\n",6);
+}
 
-    /* Second row depends on E.statusmsg and the status message update time. */
-    abAppend(&ab,"\x1b[0K",4);
-    int msglen = strlen(E.statusmsg);
-    if (msglen && time(NULL)-E.statusmsg_time < 5)
-        abAppend(&ab,E.statusmsg,msglen <= E.screencols ? msglen : E.screencols);
+/* ---- Diff and emit ------------------------------------------------------ */
 
-    /* Put cursor at its current position. Note that the horizontal position
-     * at which the cursor is displayed may be different compared to 'E.cx'
-     * because of TABs. */
-    int j;
-    int cx = 1;
-    int filerow = E.rowoff+E.cy;
-    erow *row = (filerow >= E.numrows) ? NULL : &E.row[filerow];
+/* Move the terminal from attribute 'prev' to attribute 'attr'.  Pass
+ * ATTR_UNKNOWN at the start of a changed span so the sequence is
+ * self-contained and does not depend on prior terminal state.  When only the
+ * color changes we emit just the color code, which matters because syntax
+ * highlighting flips colors several times per line. */
+static void emitAttr(unsigned char attr, unsigned char prev) {
+    int color = attr & ATTR_COLOR;
+    char buf[16];
+    int n;
+
+    if (prev == ATTR_UNKNOWN ||
+        (prev & ATTR_REVERSE) != (attr & ATTR_REVERSE))
+    {
+        obAppendStr("\x1b[0m");
+        if (attr & ATTR_REVERSE) obAppendStr("\x1b[7m");
+        if (color != COLOR_DEFAULT) {
+            n = snprintf(buf, sizeof(buf), "\x1b[%dm", color);
+            obAppend(buf, n);
+        }
+        return;
+    }
+    n = snprintf(buf, sizeof(buf), "\x1b[%dm", color);
+    obAppend(buf, n);
+}
+
+/* Bring the terminal in sync with the logical editor state in 'E'. */
+void editorRefreshScreen(void) {
+    int y, x, n;
+    int total = fbTotalRows();
+    int touched = 0;         /* Did we write any cells this pass? */
+    int cx, filerow, j;
+    erow *row;
+    char buf[32];
+
+    if (!fb_ready) {
+        /* ESC[2J blanks every cell to space-with-default-attribute, so that
+         * is exactly what the shadow should claim the screen holds.
+         * Recording blanks (rather than an impossible value) lets the diff
+         * skip empty regions and trailing whitespace entirely, so a cold
+         * start sends only the actual text. */
+        for (y = 0; y < KILO_MAX_ROWS; y++) {
+            for (x = 0; x < KILO_MAX_COLS; x++) {
+                fb_shadow[y][x].c = ' ';
+                fb_shadow[y][x].attr = COLOR_DEFAULT;
+            }
+        }
+        obAppendStr("\x1b[0m\x1b[2J");
+        fb_cursor_known = 0;
+        fb_ready = 1;
+        touched = 1;
+    }
+
+    for (y = 0; y < total; y++) {
+        int w = fbRowWidth(y);
+        int first = -1, last = -1;
+        int blank_from, stop;
+        unsigned char cur_attr;
+
+        fbRenderRow(y, w);
+
+        for (x = 0; x < w; x++) {
+            if (fb_row[x].c != fb_shadow[y][x].c ||
+                fb_row[x].attr != fb_shadow[y][x].attr)
+            {
+                if (first == -1) first = x;
+                last = x;
+            }
+        }
+        if (first == -1) continue;   /* Row unchanged: emit nothing at all. */
+
+        /* Where does this row's run of trailing default-blank cells begin?
+         * Most source lines are far shorter than the screen is wide, so
+         * clearing the tail with one ESC[0K beats emitting dozens of
+         * spaces. */
+        blank_from = w;
+        while (blank_from > 0 &&
+               fb_row[blank_from-1].c == ' ' &&
+               fb_row[blank_from-1].attr == COLOR_DEFAULT) blank_from--;
+
+        stop = last;
+        if (blank_from <= last && (last - blank_from + 1) >= 8) {
+            stop = blank_from - 1;
+        } else {
+            blank_from = -1;         /* Not worth it; write the spaces. */
+        }
+
+        if (!touched) {
+            obAppendStr("\x1b[?25l");   /* Hide cursor while we paint. */
+            touched = 1;
+        }
+
+        n = snprintf(buf, sizeof(buf), "\x1b[%d;%dH", y + 1, first + 1);
+        obAppend(buf, n);
+
+        cur_attr = ATTR_UNKNOWN;
+        for (x = first; x <= stop; x++) {
+            char ch;
+            if (fb_row[x].attr != cur_attr) {
+                emitAttr(fb_row[x].attr, cur_attr);
+                cur_attr = fb_row[x].attr;
+            }
+            ch = (char)fb_row[x].c;
+            obAppend(&ch, 1);
+            fb_shadow[y][x] = fb_row[x];
+        }
+
+        if (blank_from >= 0) {
+            /* Reset first: ESC[0K fills with the *current* background, so
+             * erasing under reverse video would paint a bright bar. */
+            obAppendStr("\x1b[0m\x1b[0K");
+            cur_attr = COLOR_DEFAULT;
+            /* ESC[0K clears to the true end of the line, so sync the whole
+             * tail, not just the part inside the changed span. */
+            for (x = (first > blank_from ? first : blank_from); x < w; x++) {
+                fb_shadow[y][x].c = ' ';
+                fb_shadow[y][x].attr = COLOR_DEFAULT;
+            }
+        }
+        if (cur_attr != COLOR_DEFAULT) obAppendStr("\x1b[0m");
+        fb_cursor_known = 0;         /* Cursor left somewhere else. */
+    }
+
+    /* Put the cursor at its logical position.  The horizontal position may
+     * differ from E.cx because of TABs. */
+    cx = 1;
+    filerow = E.rowoff + E.cy;
+    row = (filerow >= E.numrows) ? NULL : &E.row[filerow];
     if (row) {
-        for (j = E.coloff; j < (E.cx+E.coloff); j++) {
-            if (j < row->size && row->chars[j] == TAB) cx += 7-((cx)%8);
+        for (j = E.coloff; j < (E.cx + E.coloff); j++) {
+            if (j < row->size && row->chars[j] == TAB) cx += 7 - ((cx) % 8);
             cx++;
         }
     }
-    snprintf(buf,sizeof(buf),"\x1b[%d;%dH",E.cy+1,cx);
-    abAppend(&ab,buf,strlen(buf));
-    abAppend(&ab,"\x1b[?25h",6); /* Show cursor. */
-    {
-        int off = 0;
-        while (off < ab.len) {
-            int chunk = ab.len - off;
-            if (chunk > 32) chunk = 32;
-            sys_write(STDOUT_FILENO, ab.b + off, chunk);
-            off += chunk;
-        }
+    if (!fb_cursor_known || fb_cursor_row != E.cy + 1 || fb_cursor_col != cx) {
+        n = snprintf(buf, sizeof(buf), "\x1b[%d;%dH", E.cy + 1, cx);
+        obAppend(buf, n);
+        fb_cursor_row = E.cy + 1;
+        fb_cursor_col = cx;
+        fb_cursor_known = 1;
     }
-    abFree(&ab);
+
+    if (touched) obAppendStr("\x1b[?25h");   /* Show cursor again. */
+
+    obFlush();   /* Nothing queued => no syscall at all. */
 }
 
 /* Set an editor status message for the second line of the status, at the
@@ -1250,7 +1496,10 @@ void editorProcessKeypress(int fd) {
         editorMoveCursor(c);
         break;
     case CTRL_L: /* ctrl+l, clear screen */
-        /* Just refresht the line as side effect. */
+        /* RISCVRAM: With differential updates this is the escape hatch --
+         * it throws away our shadow copy of the screen and repaints from
+         * scratch, in case anything else scribbled on the terminal. */
+        editorForceRedraw();
         break;
     case ESC:
         /* Nothing to do for ESC in this mode. */
@@ -1270,7 +1519,11 @@ int editorFileWasModified(void) {
 void updateWindowSize(void) {
     E.screencols = 80;
     E.screenrows = 24;
+    /* RISCVRAM: the framebuffers are statically sized, so clamp. */
+    if (E.screencols > KILO_MAX_COLS) E.screencols = KILO_MAX_COLS;
+    if (E.screenrows > KILO_MAX_ROWS) E.screenrows = KILO_MAX_ROWS;
     E.screenrows -= 2;
+    editorForceRedraw();
 }
 
 /* RISCVRAM: no SIGWINCH support — window size is fixed at startup.
@@ -1291,6 +1544,8 @@ void initEditor(void) {
 }
 
 int main(int argc, char **argv) {
+    int is_new;
+
     if (argc != 2) {
         fprintf(0,"Usage: kilo <filename>\n\r");
         exit(1);
@@ -1298,10 +1553,14 @@ int main(int argc, char **argv) {
 
     initEditor();
     editorSelectSyntaxHighlight(argv[1]);
-    editorOpen(argv[1]);
+    is_new = editorOpen(argv[1]);
     enableRawMode(STDIN_FILENO);
-    editorSetStatusMessage(
-        "HELP: Ctrl-S = save | Ctrl-Q = quit | Ctrl-F = find");
+    if (is_new)
+        editorSetStatusMessage("New file \"%s\" -- Ctrl-S = save | Ctrl-Q = quit",
+                               argv[1]);
+    else
+        editorSetStatusMessage(
+            "HELP: Ctrl-S = save | Ctrl-Q = quit | Ctrl-F = find");
     while(1) {
         editorRefreshScreen();
         editorProcessKeypress(STDIN_FILENO);
