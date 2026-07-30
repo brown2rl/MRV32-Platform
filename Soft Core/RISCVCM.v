@@ -12,7 +12,8 @@ output reg tu, tuwfi, restu, ecall, sret, mret, sdrs, sdws, srs, pc, pcpi, mpi, 
 wire[31:0] instruction;
 reg[5:0] T;
 reg[16:0] scounter;
-reg wfi, resT, sup, pf, ri;
+reg wfi_irq, wfi_dev, resT, sup, pf, ri;
+wire wfi = wfi_irq | wfi_dev;
 localparam [4:0]
     add  = 5'd1,
     mul  = 5'd2,
@@ -44,13 +45,14 @@ localparam [4:0]
     
 assign instruction = IR_CM;
 
-always @* tuwfi = wfi;
+always @* tuwfi = wfi_irq;   // device stalls are NOT interruptible
 
 initial
 begin
 	T = 3'b0;
 	//resT = 1'b1;
-	wfi = 1'b0;
+	wfi_irq = 1'b0;
+	wfi_dev = 1'b0;
 	REG_A	= 0;	
 	REG_B	= 0;
 	REG_D	= 0;
@@ -124,21 +126,23 @@ always @(posedge clk)
 if (stupc)
 begin
     	T <= 0;
-    	wfi <= 0;
+    	wfi_irq <= 0;
+    	wfi_dev <= 0;
 end
-else if (rxinterrupt && wfi)
+else if (rxinterrupt && wfi_irq)
 begin
 	T <= 0;
-	wfi <= 0;
+	wfi_irq <= 0;
 end
 else if (tx_int_ack)
 begin
     	T <= 0;
-    	wfi <= 0;
+    	wfi_irq <= 0;
+    	wfi_dev <= 0;
 end
-else if (wfi && dev_stop_signal)
+else if (wfi_dev && dev_stop_signal)
 begin
-    	wfi <= 0;
+    	wfi_dev <= 0;
 end
 else if (!wfi)
 begin
@@ -1504,7 +1508,7 @@ begin
 			if (instruction[31:20] == 12'b000100000101)
 				if (T == 6)
 				begin
-					wfi <= 1;
+					wfi_irq <= 1;
 				end
 		end		
 		
@@ -1796,7 +1800,7 @@ begin
 				
 				if (T == 7)
 				begin
-				    wfi <= 1;
+				    wfi_dev <= 1;
 				end
 			
 				if (T >= 8)
@@ -1862,7 +1866,7 @@ begin
                 		
                 		if (T == 6)	
 				begin
-				    wfi <= 1;
+				    wfi_dev <= 1;
 				end
 			
 				if (T >= 7)
@@ -1899,7 +1903,7 @@ begin
                 		
                 		if (T == 6)	
 				begin
-				    wfi <= 1;
+				    wfi_dev <= 1;
 				end
 			
 				if (T >= 7)

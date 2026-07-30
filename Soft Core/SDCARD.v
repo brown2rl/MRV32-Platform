@@ -1,8 +1,8 @@
-module SD_Controller(clk, reset, ss, start, tx_byte, sdc_wirq_en, sdc_rirq_en, srr8, srr32, next_read_address, next_write_address, cs_en, clk_on, clk_cnt, rx_byte, busy, done, card_busy, sd_read_interrupt, sd_write_interrupt, SDC_DEV, DEV_SDC, RAM_SDC, MAR_DEV, SAR_SDC, sdccontin, sdccontout, CSR_DEV_BUS_IN, CSR_DEV_BUS_OUT);
+module SD_Controller(clk, reset, ss, start, tx_byte, sdc_wirq_en, sdc_rirq_en, srr8, srr32, next_read_address, next_write_address, cs_en, clk_on, clk_cnt, rx_byte, busy, done, card_busy, sd_read_interrupt, sd_write_interrupt, SDC_DEV, DEV_SDC, MAR_DEV, SAR_SDC, sdccontin, sdccontout, CSR_DEV_BUS_IN, CSR_DEV_BUS_OUT);
 
     input clk, busy, done, reset, sdc_wirq_en, sdc_rirq_en, sd_read_interrupt, sd_write_interrupt, srr8, srr32;
-    input [7:0] rx_byte, DEV_SDC, MAR_DEV, RAM_SDC, sdccontout;
-    input [31:0] SAR_SDC, CSR_DEV_BUS_IN, CSR_DEV_BUS_OUT;
+    input [7:0] rx_byte, MAR_DEV, sdccontout;
+    input [31:0] SAR_SDC, DEV_SDC, CSR_DEV_BUS_IN, CSR_DEV_BUS_OUT;
     output reg start, cs_en, ss, clk_on, card_busy, next_read_address, next_write_address;
     output reg [7:0] tx_byte, sdccontin, SDC_DEV;
     output reg [15:0] clk_cnt;

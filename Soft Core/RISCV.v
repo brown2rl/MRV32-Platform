@@ -6,7 +6,7 @@ output tx, mosi, cs, sclk;
 wire rxinterrupt, rxack, txready, txbusy, tuwfi, tx_irq_en, dev_start_signal, dev_stop_signal, address_progression, sdevram, srs, tu, restu, ecall, tucall, tuint, sret, mret, rdwe, cur, sdrd, sdrs, next_read_address, read_write_address, in0o, rstco, tupccs, tucspc, ipc, rpi, ramwe, stupc, stucsr, scmcsi, scmcst, scsr0, rlpccs, pc, scmpc, jalr, pcpi, spm, smr, srm, crm, smi, sri, spcr, spcrt, srpc, spca, sraa, srab, sar, scmr, srcm, srram, srr8, srr16, srr32, sramrs8, sramrs16, sramrs32, sramru8, sramru16, sramru32, scsr, srcs, spcs, scsp, scmcs, csbmr, csbmi, csor, csori, csan, csrl, csani, smrar, add, mul, lt, gt, gtu, br, eq, neq, ltu, XOR, OR, AND, sll, srl, sra, sub, sllr, scma, scmau;
 wire[4:0] REG_A, REG_B, REG_D, ALU_OP;
 wire[5:0] div_cnt;
-wire[31:0] PC_MAR, MAR_RAM, SAR_SDC, MAR_UART, RAM_IR, IR_CM, PC_REGS, REGS_PC, REGS_SAR, REGS_ALU_A, REGS_ALU_B, ALU_REGS, CM_REGS, REGS_CM, ALU_CM, REGS_RAM, RAM_REGS, CSR_REGS, REGS_CSR, REGS_MAR, CM_CSRI, CM_CSRT, PC_CSR, CSR_PC_MTVEC, CSR_PC_MEPC, CSR_PC_TXVEC, CSR_PC_RXVEC, TU_CSR, TU_PC, UART_MAR, CSR_PC_SDCWVEC, CSR_PC_SDCRVEC, CSR_DEV_BUS_IN, CSR_DEV_BUS_OUT;
+wire[31:0] testwire, PC_MAR, MAR_RAM, SAR_SDC, MAR_UART, RAM_IR, IR_CM, PC_REGS, REGS_PC, REGS_SAR, REGS_ALU_A, REGS_ALU_B, ALU_REGS, CM_REGS, REGS_CM, ALU_CM, REGS_RAM, RAM_REGS, CSR_REGS, REGS_CSR, REGS_MAR, CM_CSRI, CM_CSRT, PC_CSR, CSR_PC_MTVEC, CSR_PC_MEPC, CSR_PC_TXVEC, CSR_PC_RXVEC, TU_CSR, TU_PC, UART_MAR, CSR_PC_SDCWVEC, CSR_PC_SDCRVEC, CSR_DEV_BUS_IN, CSR_DEV_BUS_OUT;
 wire[11:0] CM_CSR;
 reg[31:0] DEV_REGS, DEV_UART, DEV_RAM, DEV_SDC, DEV;
 reg[7:0] incont, outcont, ramcontout, sdccontout, uartcontout;
@@ -15,7 +15,7 @@ wire[31:0] CM_MAR;
 wire[31:0] CM_ALU, PC_ALU;
 wire[7:0] tx_byte, rx_byte, RAM_DEV, UART_DEV, SDC_DEV, MAR_DEV, ramcontin, sdccontin, uartcontin;
 wire[15:0] clk_cnt;
-reg indicators = 0, srmp, srsp;
+reg indicators = 1, srmp, srsp;
 
 clk_wiz_0 CW1(clk_out1, clk_in1);
 
@@ -32,7 +32,7 @@ SAR SAR1(clk_out1, srs, srsp, REGS_SAR, SAR_SDC);
 IR IR1(clk_out1, sri, srm, smi, mpi, rpi, srr8, srr16, srr32, crm, pc, IR_CM, RAM_IR);
 
 (* dont_touch = "true" *)
-RAM RAM1(clk_out1, indicators, dev_start_signal, dev_stop_signal, address_progression, sdevram, rst, srr8, srr16, srr32, sramrs8, sramrs16, sramrs32, sramru8, sramru16, tx_irq_en, next_read_address, DEV_RAM, RAM_DEV, MAR_RAM, RAM_REGS, REGS_MAR, REGS_RAM, RAM_SDC, RAM_IR, ramcontin, ramcontout, CSR_DEV_BUS_IN, CSR_DEV_BUS_OUT);
+RAM RAM1(clk_out1, indicators, dev_start_signal, dev_stop_signal, address_progression, sdevram, rst, srr8, srr16, srr32, sramrs8, sramrs16, sramrs32, sramru8, sramru16, tx_irq_en, next_read_address, DEV_RAM, RAM_DEV, MAR_RAM, RAM_REGS, REGS_MAR, REGS_RAM, RAM_IR, ramcontin, ramcontout, CSR_DEV_BUS_IN, CSR_DEV_BUS_OUT);
 
 (* dont_touch = "true" *)
 CM CM1(clk_out1, rst, tu, restu, ecall, sret, mret, tuwfi, rxinterrupt, tx_int_ack, dev_start_signal, dev_stop_signal, sdevram, sdrs, sdrd, sdws, sdwd, spp, ssp, srs, pc, bacm, stucsrpc, pcpi, ipc, mpi, rpi, scmcsi, scmcst, scmpc, jalr, cur, smi, spm, srm, crm, sri, spcr, spcrt, srpc, spca, sraa, srab, sar, scmr, srcm, srram, srr8, srr16, srr32, sramrs8, sramrs16, sramrs32, sramru8, sramru16, scsr, srcs, spcs, scsp, scmcs, csbmr, csbmi, csor, csori, csan, csrl, csani, smrar, scma, scmau, stupc, ALU_OP, CM_PC, IR_CM, REGS_CM, CM_REGS, REG_A, REG_B, REG_D, CM_ALU, ALU_CM, CM_CSR, CM_CSRI, CM_CSRT, CM_MAR, CSR_DEV_BUS_IN, CSR_DEV_BUS_OUT);
@@ -53,7 +53,7 @@ Trap_Unit TU1(clk_out1, restu, tuwfi, tucall, tuint, tupc, rxinterrupt, rxack, t
 UART UART1(clk_out1, indicatorsin, cur, tx, rx, rxack, srm, mpi, srr8, srr32, rxinterrupt, txready, txbusy, UART_DEV, DEV_UART, REGS_MAR, UART_MAR, MAR_UART, uartcontin, uartcontout, CSR_DEV_BUS_IN, CSR_DEV_BUS_OUT);
 
 (* dont_touch = "true" *)
-SD_Controller SDC1(clk_out1, reset, ss, start, tx_byte, sdc_wirq_en, sdc_rirq_en, srr8, srr32, next_read_address, next_write_address, cs_en, clk_on, clk_cnt, rx_byte, busy, done, card_busy, sd_read_interrupt, sd_write_interrupt, SDC_DEV, DEV_SDC, RAM_SDC, MAR_DEV, SAR_SDC, sdccontin, sdccontout, CSR_DEV_BUS_IN, CSR_DEV_BUS_OUT);
+SD_Controller SDC1(clk_out1, reset, ss, start, tx_byte, sdc_wirq_en, sdc_rirq_en, srr8, srr32, next_read_address, next_write_address, cs_en, clk_on, clk_cnt, rx_byte, busy, done, card_busy, sd_read_interrupt, sd_write_interrupt, SDC_DEV, DEV_SDC, MAR_DEV, SAR_SDC, sdccontin, sdccontout, CSR_DEV_BUS_IN, CSR_DEV_BUS_OUT);
 
 (* dont_touch = "true" *)
 SPI_Engine SPI1(clk_out1, start, tx_byte, cs_en, clk_on, clk_cnt, miso, rx_byte, busy, done, cs, sclk, mosi);
