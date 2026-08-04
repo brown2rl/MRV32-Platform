@@ -3,7 +3,7 @@ module MAR(clk, mpi, rpi, spm, srm, srmp, crm, smi, address_progression, scm, PC
 input clk, mpi, rpi, spm, srm, srmp, crm, smi, scm, address_progression;
 input[31:0] PC_MAR, REGS_MAR, CACHE_MAR;
 input[31:0] CM_MAR;
-output[31:0] MAR_RAM, MAR_UART;
+output[31:0] MAR_RAM, MAR_UART, MAR_DCAR;
 reg[31:0] MAR;
 reg increment_mar; 
 
@@ -53,5 +53,6 @@ end
 
 assign MAR_RAM = MAR;
 assign MAR_UART = MAR;
+assign MAR_DCAR = MAR;
 
 endmodule

@@ -9,25 +9,25 @@
 // data cache address register module (DCAR)
 // instruction cache address register module (ICAR)
  
-module CACHE(clk, scm, pc);
+module CACHE(clk, scm, spm);
 
-input clk, scm, pc; //indicators, rst, srr8, srr16, srr32, sramrs8, sramrs16, sramrs32, sramru8, sramru16, byte_ready, dev_start_signal, sdevram;
-input[31:0] PC_CACHE, REGS_CACHE, RAM_CACHE, CSR_DEV_BUS_IN, CSR_DEV_BUS_OUT;
+input clk, scm, spm; //indicators, rst, srr8, srr16, srr32, sramrs8, sramrs16, sramrs32, sramru8, sramru16, byte_ready, dev_start_signal, sdevram;
+input[31:0] PC_CACHE, REGS_CACHE, RAM_CACHE, CSR_DEV_BUS_IN, CSR_DEV_BUS_OUT, DCAR_CACHE;
 
 output[31:0] CACHE_IR, CACHE_RAM, CACHE_MAR, CACHE_REGS, CACHE_DCAR, CACHE_ICAR;
 output cache_done;
 
-reg[31:0] mar_address; // may need to change to 17
+reg[31:0] mar_address; // 5 bit index + 5 bit offset
 reg[31:0] instruction;
 reg[31:0] cache_data[0:31], cache_instruction[0:31];
 reg[7:0] mar_index, ram_index, regs_index, ir_index, pc_index;
+reg[31:0] index_data, index_instruction;
 reg[3:0] done, idle, ram_state, ram_full_state, pc_state, pc_full_state, regs_state, regs_full_state, ir_state, ir_full_state, mar_state, mar_full_state, bus_state, bus_full_state, current_state, next_state;
-
-reg cd, ci, done, idle, ram, pc, regs;
+reg cd, ci;
 
 initial
 	begin
-		cd, ci, cache_done, done, idle, ram, pc, regs = 0;
+		cd, ci, cache_done = 0;
 		done = 4'b0000;
 		idle = 4'b0001;
 		ram_state = 4'b0010;
@@ -50,10 +50,13 @@ initial
 
 always @(posedge clk)
 	current_state <= next_state;
-	
+
+	index_data <= PC_CACHE[9:5];
+
 	if(scm && current_state == mar_state)
 		begin
-   	//		mar_address <= cache_data[mar_index];
+	//		cache_data[index_data] <= DCAR_CACHE;
+   	//		mar_address <= cache_data[index_data];
 	//
 		end
 	if(current_state == ir_state)
@@ -70,16 +73,19 @@ if(current_state == mar_full_state)
 	begin
 		scm = 0;
 	end
-
+else if(current_state == mar_state)
+	begin
+		scm = 1;
+	end
 else if(current_state == ram_state && cd ^ ci)
 	begin
 		if(cd)
 			begin
-				assign CACHE_RAM = cache_data[ram_index];
+				CACHE_RAM = cache_data[ram_index];
 			end
 		if(ci)
 			begin
-				assign CACHE_RAM = cache_instruction[ram_index];
+				CACHE_RAM = cache_instruction[ram_index];
 			end
 	end
 
