@@ -1,7 +1,7 @@
-module MAR(clk, mpi, rpi, spm, srm, srmp, crm, smi, address_progression, PC_MAR, MAR_RAM, REGS_MAR, CM_MAR, MAR_UART);
+module MAR(clk, mpi, rpi, spm, srm, srmp, crm, smi, address_progression, scm, PC_MAR, MAR_RAM, REGS_MAR, CM_MAR, MAR_UART);
 
-input clk, mpi, rpi, spm, srm, srmp, crm, smi, address_progression;
-input[31:0] PC_MAR, REGS_MAR;
+input clk, mpi, rpi, spm, srm, srmp, crm, smi, scm, address_progression;
+input[31:0] PC_MAR, REGS_MAR, CACHE_MAR;
 input[31:0] CM_MAR;
 output[31:0] MAR_RAM, MAR_UART;
 reg[31:0] MAR;
@@ -44,6 +44,10 @@ else if (increment_mar)
 begin
     MAR <= MAR + 1;
     increment_mar <= 0;
+end
+else if (scm)
+begin
+	MAR <= CACHE_MAR;
 end
 
 

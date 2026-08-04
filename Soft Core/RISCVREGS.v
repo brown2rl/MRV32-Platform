@@ -4,7 +4,7 @@ input clk, indicators;
 input spcr, spcrt, sraa, srab, sar, scmr, sramr, scsr;
 input sramrs8, sramrs16, sramrs32, sramru8, sramru16;
 
-input [31:0] PC_REGS, CM_REGS, RAM_REGS, CSR_REGS, ALU_REGS;
+input [31:0] PC_REGS, CM_REGS, RAM_REGS, CSR_REGS, ALU_REGS, CACHE_REGS;
 input [4:0]  REG_A, REG_B, REG_D;
 
 output reg out;

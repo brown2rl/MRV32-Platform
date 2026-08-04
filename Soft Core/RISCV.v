@@ -3,10 +3,10 @@ module System(clk_in1, tx, rx, miso, mosi, cs, sclk);
 
 input clk_in1, rx, miso;
 output tx, mosi, cs, sclk;
-wire rxinterrupt, rxack, txready, txbusy, tuwfi, tx_irq_en, dev_start_signal, dev_stop_signal, address_progression, sdevram, srs, tu, restu, ecall, tucall, tuint, sret, mret, rdwe, cur, sdrd, sdrs, next_read_address, read_write_address, in0o, rstco, tupccs, tucspc, ipc, rpi, ramwe, stupc, stucsr, scmcsi, scmcst, scsr0, rlpccs, pc, scmpc, jalr, pcpi, spm, smr, srm, crm, smi, sri, spcr, spcrt, srpc, spca, sraa, srab, sar, scmr, srcm, srram, srr8, srr16, srr32, sramrs8, sramrs16, sramrs32, sramru8, sramru16, sramru32, scsr, srcs, spcs, scsp, scmcs, csbmr, csbmi, csor, csori, csan, csrl, csani, smrar, add, mul, lt, gt, gtu, br, eq, neq, ltu, XOR, OR, AND, sll, srl, sra, sub, sllr, scma, scmau;
+wire rxinterrupt, rxack, txready, txbusy, tuwfi, tx_irq_en, dev_start_signal, dev_stop_signal, address_progression, sdevram, srs, tu, restu, ecall, tucall, tuint, sret, mret, rdwe, cur, sdrd, sdrs, next_read_address, read_write_address, in0o, rstco, tupccs, tucspc, ipc, rpi, ramwe, stupc, stucsr, scmcsi, scmcst, scsr0, rlpccs, pc, scmpc, jalr, pcpi, spm, smr, srm, crm, smi, sri, spcr, spcrt, srpc, spca, sraa, srab, sar, scmr, srcm, srram, srr8, srr16, srr32, sramrs8, sramrs16, sramrs32, sramru8, sramru16, sramru32, scsr, srcs, spcs, scsp, scmcs, csbmr, csbmi, csor, csori, csan, csrl, csani, smrar, add, mul, lt, gt, gtu, br, eq, neq, ltu, XOR, OR, AND, sll, srl, sra, sub, sllr, scma, scmau, scm;
 wire[4:0] REG_A, REG_B, REG_D, ALU_OP;
 wire[5:0] div_cnt;
-wire[31:0] testwire, PC_MAR, MAR_RAM, SAR_SDC, MAR_UART, RAM_IR, IR_CM, PC_REGS, REGS_PC, REGS_SAR, REGS_ALU_A, REGS_ALU_B, ALU_REGS, CM_REGS, REGS_CM, ALU_CM, REGS_RAM, RAM_REGS, CSR_REGS, REGS_CSR, REGS_MAR, CM_CSRI, CM_CSRT, PC_CSR, CSR_PC_MTVEC, CSR_PC_MEPC, CSR_PC_TXVEC, CSR_PC_RXVEC, TU_CSR, TU_PC, UART_MAR, CSR_PC_SDCWVEC, CSR_PC_SDCRVEC, CSR_DEV_BUS_IN, CSR_DEV_BUS_OUT;
+wire[31:0] testwire, PC_MAR, MAR_RAM, SAR_SDC, MAR_UART, RAM_IR, IR_CM, PC_REGS, REGS_PC, REGS_SAR, REGS_ALU_A, REGS_ALU_B, ALU_REGS, CM_REGS, REGS_CM, ALU_CM, REGS_RAM, RAM_REGS, CSR_REGS, REGS_CSR, REGS_MAR, CM_CSRI, CM_CSRT, PC_CSR, CSR_PC_MTVEC, CSR_PC_MEPC, CSR_PC_TXVEC, CSR_PC_RXVEC, TU_CSR, TU_PC, UART_MAR, CSR_PC_SDCWVEC, CSR_PC_SDCRVEC, CSR_DEV_BUS_IN, CSR_DEV_BUS_OUT, PC_CACHE, REGS_CACHE, CACHE_IR, CACHE_RAM, CACHE_MAR;
 wire[11:0] CM_CSR;
 reg[31:0] DEV_REGS, DEV_UART, DEV_RAM, DEV_SDC, DEV;
 reg[7:0] incont, outcont, ramcontout, sdccontout, uartcontout;
@@ -20,10 +20,13 @@ reg indicators = 1, srmp, srsp;
 clk_wiz_0 CW1(clk_out1, clk_in1);
 
 (* dont_touch = "true" *)
+Cache CACHE(clk_out1, pc, );
+
+(* dont_touch = "true" *)
 Program_Counter PC1(clk_out1, indicators, pc, tupc, stucsrpc, pcpi, ipc, jalr, srpc, scspcecall, scspcmret, scspctxint, scspcrxint, bacm, PC_MAR, PC_ALU, CM_PC, REGS_PC, PC_REGS, CSR_PC_MTVEC, CSR_PC_MEPC, CSR_PC_TXVEC, CSR_PC_RXVEC, PC_CSR, TU_PC);
 
 (* dont_touch = "true" *)
-MAR MAR1(clk_out1, mpi, rpi, spm, srm, srmp, crm, smi, address_progression, PC_MAR, MAR_RAM, REGS_MAR, CM_MAR, MAR_UART);
+MAR MAR1(clk_out1, mpi, rpi, spm, srm, srmp, crm, smi, scm, address_progression, PC_MAR, MAR_RAM, REGS_MAR, CM_MAR, MAR_UART);
 
 (* dont_touch = "true" *)
 SAR SAR1(clk_out1, srs, srsp, REGS_SAR, SAR_SDC);
