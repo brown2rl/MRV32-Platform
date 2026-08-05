@@ -20,12 +20,14 @@ output cache_done;
 reg[31:0] mar_address; // 5 bit index + 5 bit offset + tag
 reg[31:0] instruction;
 reg[279:0] cache_data[0:31], cache_instruction[0:31];
+reg[278:0] cache_data_temp;
 reg[7:0] mar_index, ram_index, regs_index, ir_index, pc_index;
 reg[4:0] index_data, offset_data;
 // index_instruction;
 reg[3:0] done, idle, ram_state, ram_full_state, pc_state, pc_full_state, regs_state, regs_full_state, ir_state, ir_full_state, mar_state, mar_full_state, bus_state, bus_full_state, current_state, next_state;
 reg cd, ci;
 
+wire index_data = DCAR_CACHE[9:5];
 initial
 	begin
 		cd, ci, cache_done = 0;
@@ -51,26 +53,43 @@ initial
 
 
 always @(posedge clk)
-	current_state <= next_state;
+	begin
+		current_state <= next_state;
 
-	index_data <= PC_CACHE[9:5];
+		//index_data <= PC_CACHE[9:5];
 
-	if(scm)
-		begin
-			current_state <= mar_state;
-			index_data <= DCAR_CACHE[9:5];
-			cache_data[index_data] <= DCAR_CACHE[278:0];
-			DCAR_CACHE[279] <= 1;
-   			mar_address <= cache_data[offset_data];
-	
-		end
-	if(current_state == ir_state)
-		begin
-	//		instruction <= cache_instruction[ir_index];
-		end
+		if(scm)
+			begin
+				index_data <= DCAR_CACHE[9:5];
+				cache_data[index_data] <= DCAR_CACHE[278:0];
+				DCAR_CACHE[279] <= 1;
+   				mar_address <= cache_data[offset_data];
+				cache_data_temp <= cache_data[index_data];
+			end
+
+		/*
+		if(current_state == ir_state)
+			begin
+				instruction <= cache_instruction[ir_index];
+			end
+		*/
+	end
+
+always @(posedge clk)
+	begin
+		if (cache_data_temp[278] != 1)
+			begin 
+				current_state <= mar_state; 
+			end
+		else
+			begin
+				/* send byte-selected data to ir */
+			end
+	end
 
 assign CACHE_MAR = mar_address;
 assign CACHE_IR = instruction;
+
 
 /*
 always @*
