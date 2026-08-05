@@ -4,7 +4,7 @@ input clk, indicators, pc, ipc, tupc, stucsrpc, pcpi, jalr, srpc, scspcecall, sc
 input[31:0] REGS_PC, CSR_PC_MTVEC, CSR_PC_MEPC, CSR_PC_TXVEC, CSR_PC_RXVEC, TU_PC;
 input[19:0] CM_PC;
 output[31:0] PC_REGS, PC_CSR, PC_ALU, PC_CACHE;
-output reg[31:0] PC_MAR;
+//output reg[31:0] PC_MAR;
 reg[33:0] program_counter;
 
 initial
@@ -67,9 +67,9 @@ end
 
 always @*
 if (!ipc)
-	PC_MAR = program_counter;
+	PC_CACHE = program_counter;
 else
-	PC_MAR = 34'b0;
+	PC_CACHE = 34'b0;
 
 assign PC_ALU = program_counter;
 assign PC_REGS = program_counter;

@@ -19,18 +19,13 @@ output[31:0] CACHE_IR, CACHE_RAM, CACHE_MAR, CACHE_REGS;
 output[278:0] CACHE_DCAR, CACHE_ICAR;
 output cache_done;
 
-reg[31:0] mar_address; 
-
-reg[31:0] cache_word;
+reg[31:0] mar_address, cache_word, cache_address;
 reg[279:0] cache_data[0:31], cache_instruction[0:31]; // data reg -> 0-10: mar, 11-19: regs, 20-30: pc; instruction reg -> 0-16: pc, 17-31: ram
-reg[278:0] cache_line; //  tag + 5 bit index + 5 bit offset, consider 64 bytes (256+278) wide
-//reg[7:0] mar_index, ram_index, regs_index, ir_index, pc_index;
-// index_instruction;
+reg[278:0] cache_line; //32 bytes, tag + 5 bit index + 5 bit offset, consider 64 bytes (256+278) wide
 reg[3:0] done, idle, ram_state, ram_full_state, pc_state, pc_full_state, regs_state, regs_full_state, ir_state, ir_full_state, mar_state, mar_full_state, bus_state, bus_full_state, current_state, next_state;
 reg cd, ci;
-reg[160:0] address_index_translator; // stores array indicies, use index to seach for the array index
-reg[4:0] current_index;
-reg[4:0] index, offset;
+reg[159:0] address_index_translator; // stores array indicies, use index to seach for the array index
+reg[4:0] current_index, index, offset;
 reg[7:0] offset_bit;
 
 initial
@@ -64,20 +59,18 @@ always @(posedge clk)
 
 		if(scm)
 			begin
-				index_data <= DCAR_CACHE[9:5];
-				offset_data <= DCAR_CACHE[4:0];
-				cache_data[index_data] <= DCAR_CACHE[278:0];
+				index <= DCAR_CACHE[9:5];
+				offset <= DCAR_CACHE[4:0];
+				cache_data[index] <= DCAR_CACHE[278:0];
 				DCAR_CACHE[279] <= 1;
-   				mar_address <= cache_data[offset_data];
-				cache_line <= cache_data[index_data];
+   				mar_address <= cache_data[offset];
+				cache_line <= cache_data[index];
 			end
-	end
 
-always @(posedge clk)
-	begin
-		if (cache_data_temp[278] != 1)
+		if (cache_line[278] != 1)
 			begin 
 				current_state <= mar_state; 
+				current_index <= index;
 			end
 		else
 			begin
@@ -93,23 +86,29 @@ always @*
 		// bit shift
 		offset_bit[7:0] = offset[4:0] << 3;
 
-		if (cache_data_temp[277:256] == PC_CACHE[31:10])
+		if (cache_line[277:256] == PC_CACHE[31:10])
 			begin
-				cache_word = cache_data_temp[offsetbit +: 32];
+				cache_word = cache_line[offsetbit +: 32];
 			end
-		/*
-		// if index found in translator, set mar address from cache line else
-			begin
-				mar_address = PC_CACHE;
-			end
-		*/
+
 		if(current_state == mar_full_state)
 			begin
 				scm = 0;
 			end
 		else if(current_state == mar_state)
 			begin
-				scm = 1;
+		/*
+				// if index found in translator, set mar address from cache line
+				if (current_index == address_index_translator[31:0] || current_index == address_index_translator[63:32] || current_index == address_index_translator[95:64] || current_index == address_index_translator[127:96] || current_index == address_index_translator[159:128])
+					begin
+						cache_address = cache_line[offsetbit +: 32]; // just an idea, not sure which bits are the address in the cache line
+						mar_address = cache_address;
+					end
+				else
+					begin
+						mar_address = PC_CACHE;
+					end
+		*/
 			end
 /*
 		else if(current_state == ram_state && cd ^ ci)
