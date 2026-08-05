@@ -17,11 +17,12 @@ input[31:0] PC_CACHE, REGS_CACHE, RAM_CACHE, CSR_DEV_BUS_IN, CSR_DEV_BUS_OUT, DC
 output[31:0] CACHE_IR, CACHE_RAM, CACHE_MAR, CACHE_REGS, CACHE_DCAR, CACHE_ICAR;
 output cache_done;
 
-reg[31:0] mar_address; // 5 bit index + 5 bit offset
+reg[31:0] mar_address; // 5 bit index + 5 bit offset + tag
 reg[31:0] instruction;
-reg[31:0] cache_data[0:31], cache_instruction[0:31];
+reg[279:0] cache_data[0:31], cache_instruction[0:31];
 reg[7:0] mar_index, ram_index, regs_index, ir_index, pc_index;
-reg[31:0] index_data, index_instruction;
+reg[4:0] index_data, offset_data;
+// index_instruction;
 reg[3:0] done, idle, ram_state, ram_full_state, pc_state, pc_full_state, regs_state, regs_full_state, ir_state, ir_full_state, mar_state, mar_full_state, bus_state, bus_full_state, current_state, next_state;
 reg cd, ci;
 
@@ -43,7 +44,8 @@ initial
 		bus_state = 4'b1100;
 		bus_full_state = 4'b1101;
 		current_state = idle;
-		next_state = done;		
+		next_state = done;
+		DCAR_CACHE[279] = 1'b0;		
 	end
 
 
@@ -53,11 +55,14 @@ always @(posedge clk)
 
 	index_data <= PC_CACHE[9:5];
 
-	if(scm && current_state == mar_state)
+	if(scm)
 		begin
-	//		cache_data[index_data] <= DCAR_CACHE;
-   	//		mar_address <= cache_data[index_data];
-	//
+			current_state <= mar_state;
+			index_data <= DCAR_CACHE[9:5];
+			cache_data[index_data] <= DCAR_CACHE[278:0];
+			DCAR_CACHE[279] <= 1;
+   			mar_address <= cache_data[offset_data];
+	
 		end
 	if(current_state == ir_state)
 		begin
@@ -72,6 +77,7 @@ always @*
 if(current_state == mar_full_state)
 	begin
 		scm = 0;
+	
 	end
 else if(current_state == mar_state)
 	begin
