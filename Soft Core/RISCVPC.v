@@ -3,7 +3,7 @@ module Program_Counter(clk, indicators, pc, tupc, stucsrpc, pcpi, ipc, jalr, srp
 input clk, indicators, pc, ipc, tupc, stucsrpc, pcpi, jalr, srpc, scspcecall, scspcmret, scspctxint, scspcrxint, bacm;
 input[31:0] REGS_PC, CSR_PC_MTVEC, CSR_PC_MEPC, CSR_PC_TXVEC, CSR_PC_RXVEC, TU_PC;
 input[19:0] CM_PC;
-output[31:0] PC_REGS, PC_CSR, PC_ALU;
+output[31:0] PC_REGS, PC_CSR, PC_ALU, PC_CACHE;
 output reg[31:0] PC_MAR;
 reg[33:0] program_counter;
 
