@@ -63,7 +63,7 @@ always @(posedge clk)
 				offset <= DCAR_CACHE[4:0];
 				cache_data[index] <= DCAR_CACHE[278:0];
 				DCAR_CACHE[279] <= 1;
-   				mar_address <= cache_data[offset];
+   				//mar_address <= cache_data[offset];
 				cache_line <= cache_data[index];
 			end
 
@@ -101,7 +101,7 @@ always @*
 				// if index found in translator, set mar address from cache line
 				if (current_index == address_index_translator[31:0] || current_index == address_index_translator[63:32] || current_index == address_index_translator[95:64] || current_index == address_index_translator[127:96] || current_index == address_index_translator[159:128])
 					begin
-						cache_address = cache_line[offsetbit +: 32]; // just an idea, not sure which bits are the address in the cache line
+						cache_address = cache_line[31:10]; // just an idea, not sure which bits are the address in the cache line
 						mar_address = cache_address;
 					end
 				else
