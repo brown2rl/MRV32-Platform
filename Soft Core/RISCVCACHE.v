@@ -28,7 +28,7 @@ module CACHE(clk, scm, spm);
 	reg[4:0] address_to_index[0:31]; // stores array indicies, use index to seach for the array index 
 	reg[4:0] offset, cache_index; 
 	reg[7:0] offset_bit, address_index;
-	reg accessed_data, found_index, enqueued_data; 
+	reg accessed_data, found_index; 
 
 	localparam b = 0, h = 1, w = 2; 
 
@@ -42,7 +42,6 @@ module CACHE(clk, scm, spm);
 			READ = 4'b0011;
 			WRITE = 4'b0100;
 			DONE = 4'b0101;
-			ENQUEUED = 4'b0111;
 			data_cache_state = IDLE;
 			instruction_cache_state = IDLE;
 			accessed_data, got_index, read_start = 0;
@@ -67,7 +66,7 @@ module CACHE(clk, scm, spm);
 		begin 
 			if (data_cache_state == INDEX)
 				begin 
-					cache_index <= address_to_index[address_index]; 
+					cache_index <= address_to_index[address_index]; // need to populate address_to_index with cache indicies.. 
 					found_index <= 1; 
 				end 
 			else 
@@ -108,7 +107,7 @@ module CACHE(clk, scm, spm);
 					data_cache_state <= INDEX; 
 				end
  
-			if (data_cache_state == INDEX && got_index) 
+			if (data_cache_state == INDEX && found_index) 
 				begin
 					data_cache_state <= ACCESS;
 				end
@@ -117,7 +116,7 @@ module CACHE(clk, scm, spm);
 				begin
 					if (cache_data_line[277:256] == PC_CACHE[31:10] && cache_data_line[278])
 						begin
-							data_cache_state <= FINISH;
+							data_cache_state <= DONE;
 						end
 				end
 			else
