@@ -15,7 +15,7 @@ input[31:0] PC_CACHE, REGS_CACHE, RAM_CACHE, CSR_DEV_BUS_IN, CSR_DEV_BUS_OUT;
 
 output[31:0] CACHE_IR, CACHE_RAM, CACHE_MAR, CACHE_REGS;
 output[278:0] CACHE_DCAR, CACHE_ICAR;
-output[0] retrieve_start, retrieve_finished; // modelsim gives illegal reference when setting
+output[0] retrieve_start, retrieve_finished;
 
 reg[31:0] mar_address, cache_word, cache_data_out;
 reg[279:0] cache_data[0:31], cache_instruction[0:31]; // data reg -> 0-10: mar, 11-19: regs, 20-30: pc; instruction reg -> 0-16: pc, 17-31: ram

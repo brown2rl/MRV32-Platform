@@ -20,7 +20,7 @@ reg indicators = 1, srmp, srsp;
 clk_wiz_0 CW1(clk_out1, clk_in1);
 
 (* dont_touch = "true" *)
-Cache CACHE(clk_out1, scm, spm);
+Cache CACHE(clk, scm, spm, PC_CACHE, REGS_CACHE, RAM_CACHE, CSR_DEV_BUS_IN, CSR_DEV_BUS_OUT, CACHE_IR, CACHE_RAM, CACHE_MAR, CACHE_REGS, CACHE_DCAR, CACHE_ICAR, cache_done, out_byte, out_byte_ready, lb, lbu, lh, lhu, retrieve_start, retrieve_done);
 
 (* dont_touch = "true" *)
 Program_Counter PC1(clk_out1, indicators, pc, tupc, stucsrpc, pcpi, ipc, jalr, srpc, scspcecall, scspcmret, scspctxint, scspcrxint, bacm, PC_MAR, PC_ALU, CM_PC, REGS_PC, PC_REGS, CSR_PC_MTVEC, CSR_PC_MEPC, CSR_PC_TXVEC, CSR_PC_RXVEC, PC_CSR, TU_PC);
