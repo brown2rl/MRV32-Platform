@@ -14,11 +14,11 @@ input[7:0] out_byte;
 input[31:0] PC_CACHE, REGS_CACHE, RAM_CACHE, CSR_DEV_BUS_IN, CSR_DEV_BUS_OUT;
 
 output[31:0] CACHE_IR, CACHE_RAM, CACHE_MAR, CACHE_REGS;
-output retrieve_start, retrieve_finished; // modelsim gives illegal reference when setting
+output retrieve_start, retrieve_finished;
 
 reg[31:0] mar_address, cache_word, cache_data_out;
-reg[279:0] cache_data[0:31], cache_instruction[0:31]; // data reg -> 0-10: mar, 11-19: regs, 20-30: pc; instruction reg -> 0-16: pc, 17-31: ram
-reg[279:0] cache_line, cache_data_line, new_cache_line; //32 bytes, tag (277:256), consider 64 bytes (256+278) wide
+reg[64000:0] cache_data[0:31]; // data reg -> 0-10: mar, 11-19: regs, 20-30: pc; instruction reg -> 0-16: pc, 17-31: ram
+reg[64000:0] cache_data_line, new_cache_line; //32 bytes, tag (277:256), consider 64 bytes (256+278) wide
 reg accessed_data, write_data_cache, got_index, decide_data_cache, retrieve_state, retrieve_start, retrieve_finished;
 reg[4:0] current_index, cache_index, offset;
 reg[7:0] offset_bit, cnt;
@@ -36,7 +36,9 @@ localparam
 	ACCESS = 8,
 	width = 8;
 
+// icarus and modelsim both require width to be a constant
 //wire width = 8; //(8 << ((lb || lbu) ? b : (lh || lhu) ? h : w) - 1);
+integer i;
 
 initial
 	begin
@@ -45,6 +47,14 @@ initial
 		got_index = 1'b0;
 		decide_data_cache = 1'b0;
 		retrieve_state = 1'b0;
+
+		for (i = 0; i < 32; i = i + 1)
+		begin
+			cache_data[i] = 64000'b0;
+		end
+
+		cache_data_line = 64000'b0;
+		new_cache_line = 64000'b0;
 
 		cache_index = 5;
 		offset = 5;
@@ -105,7 +115,7 @@ begin
 	offset_bit[7:0] = offset[4:0] << 3;
 	
 	
-	if (cache_line[277:256] == PC_CACHE[31:10])
+	if (cache_data_line[277:256] == PC_CACHE[31:10])
 	begin
 		cache_word = cache_data_line[offset_bit +: 32];
 	end
