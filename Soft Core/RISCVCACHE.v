@@ -7,20 +7,19 @@
 // cache control bit input
 // perifrials and regs are cache_data
  
-module cache(clk, scm, spm, PC_CACHE, REGS_CACHE, RAM_CACHE, CSR_DEV_BUS_IN, CSR_DEV_BUS_OUT, CACHE_IR, CACHE_RAM, CACHE_MAR, CACHE_REGS, CACHE_DCAR, CACHE_ICAR, out_byte, out_byte_ready, lb, lbu, lh, lhu, retrieve_start, retrieve_finished);
+module cache(clk, scm, spm, PC_CACHE, REGS_CACHE, RAM_CACHE, CSR_DEV_BUS_IN, CSR_DEV_BUS_OUT, CACHE_IR, CACHE_RAM, CACHE_MAR, CACHE_REGS, out_byte, out_byte_ready, lb, lbu, lh, lhu, retrieve_start, retrieve_finished);
 
 input clk, scm, spm, out_byte_ready, lb, lbu, lh, lhu;
 input[7:0] out_byte;
 input[31:0] PC_CACHE, REGS_CACHE, RAM_CACHE, CSR_DEV_BUS_IN, CSR_DEV_BUS_OUT;
 
 output[31:0] CACHE_IR, CACHE_RAM, CACHE_MAR, CACHE_REGS;
-output[278:0] CACHE_DCAR, CACHE_ICAR;
-output[0] retrieve_start, retrieve_finished; // modelsim gives illegal reference when setting
+output retrieve_start, retrieve_finished; // modelsim gives illegal reference when setting
 
 reg[31:0] mar_address, cache_word, cache_data_out;
 reg[279:0] cache_data[0:31], cache_instruction[0:31]; // data reg -> 0-10: mar, 11-19: regs, 20-30: pc; instruction reg -> 0-16: pc, 17-31: ram
 reg[279:0] cache_line, cache_data_line, new_cache_line; //32 bytes, tag (277:256), consider 64 bytes (256+278) wide
-reg accessed_data, write_data_cache, got_index, decide_data_cache, retrieve_state;
+reg accessed_data, write_data_cache, got_index, decide_data_cache, retrieve_state, retrieve_start, retrieve_finished;
 reg[4:0] current_index, cache_index, offset;
 reg[7:0] offset_bit, cnt;
 reg[3:0] data_cache_state;
@@ -34,9 +33,10 @@ localparam
 	RETRIEVE = 5,
 	WRITE_CACHE = 6,
 	FINISH = 7,
-	ACCESS = 8;
+	ACCESS = 8,
+	width = 8;
 
-wire width = (8 << ((lb || lbu) ? b : (lh || lhu) ? h : w) - 1);
+//wire width = 8; //(8 << ((lb || lbu) ? b : (lh || lhu) ? h : w) - 1);
 
 initial
 	begin
