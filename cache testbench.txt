@@ -1,5 +1,0 @@
-cache testbench:
-
-qspi controller
-qspi engine
-ram
