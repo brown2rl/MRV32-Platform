@@ -14,7 +14,7 @@ input[7:0] out_byte;
 input[31:0] PC_CACHE, REGS_CACHE_ADDRESS, REGS_CACHE_DATA, RAM_CACHE, CSR_DEV_BUS_IN, CSR_DEV_BUS_OUT;
 
 output[31:0] CACHE_IR, CACHE_RAM, CACHE_MAR, CACHE_REGS;
-output[7:0] in_byte;
+output reg[7:0] in_byte;
 output cache_done;
 
 reg[3:0] cache_state, retrieve_state;
@@ -275,7 +275,7 @@ begin
 	end	
 end
 
-assign CACHE_MAR = spc ? PC_CACHE : REGS_CACHE_ADDRESS;
+assign CACHE_MAR = cache_address;
 assign CACHE_IR = sci ? cache_word : 0;
 
 endmodule
