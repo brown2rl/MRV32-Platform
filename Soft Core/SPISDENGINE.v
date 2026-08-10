@@ -1,4 +1,4 @@
-module SPI_Engine(clk, start, tx_byte, cs_en, clk_on, clk_cnt, miso, rx_byte, busy, done, cs, sclk, mosi);
+module SD_SPI_Engine_(clk, start, tx_byte, cs_en, clk_on, clk_cnt, miso, rx_byte, busy, done, cs, sclk, mosi);
 
     input clk, start, miso, cs_en, clk_on;
     input [7:0] tx_byte;
