@@ -10,16 +10,58 @@ output reg retrieve_start;
 output reg ram_write_start, dev_stop_signal, sdevbyte, address_progression;
 output reg[7:0] cachecontin;
 output[7:0] in_byte;
-output [31:0] qspi_address;
+output [24:0] qspi_address;
 
-reg[31:0] mar_address, cache_word, word, data_out;
-reg[3:0] ram_full_state, pc_state, pc_full_state, regs_state, regs_full_state, ir_state, ir_full_state, mar_state, mar_full_state, bus_state, bus_full_state, current_state, next_state, cache_state, ram_write_done, write_state;
-reg cd, ci, accessed_data, got_index;
-reg[4:0] current_index, offset;
-reg[7:0] offset_bit;
-reg[8:0] cache_index;
+// ---------------------------------------------------------
+// Cache FSM
+// ---------------------------------------------------------
 
-integer i;
+reg [3:0] cache_state;
+
+// ---------------------------------------------------------
+// Cache control
+// ---------------------------------------------------------
+
+reg accessed_data;
+reg ram_write_done;
+
+// ---------------------------------------------------------
+// Refill path
+// ---------------------------------------------------------
+
+reg [31:0] fill_word;
+reg [2:0]  fill_word_ptr;
+reg [1:0]  fill_byte;
+reg         fill_we;
+reg         filling;
+
+// ---------------------------------------------------------
+// Write-back path
+// ---------------------------------------------------------
+
+reg [2:0]  wb_word;
+reg [1:0]  wb_byte;
+reg [2:0]  write_state;
+reg [31:0] wb_shift;
+
+// ---------------------------------------------------------
+// Tag/address latches w/ RAM output reg
+// ---------------------------------------------------------
+
+reg [17:0] tag_r;
+reg [8:0]  idx_r;
+reg [2:0]  word_r;
+reg [1:0]  byte_r;
+reg [17:0] victim_tag;
+reg [511:0] valid;
+reg [511:0] dirty;
+reg [17:0] tag_do;
+reg valid_do, dirty_do, refill_done;
+reg [31:0] dram_do;
+(* ram_style = "block" *) reg [17:0] tag_ram [0:511];
+(* ram_style = "block" *) reg [31:0] data_ram [0:4095];
+reg [31:0] load_reg;
+
 localparam
 	b = 0,
 	h = 1,
@@ -35,91 +77,109 @@ localparam
 	MERGE = 11,
 	ACCESS2 = 12,
 	ACCESS2_DONE = 13,
-	FINISH = 14;	
+	FINISH = 14;
+
+integer k;
 
 initial
-	begin
-		cd = 0;
-		ci = 0;
-		ram_full_state = 4'b0011;
-		pc_state = 4'b0100;
-		pc_full_state = 4'b0101;
-		regs_state = 4'b0110;
-		regs_full_state = 4'b0111;
-		ir_state = 4'b1000;
-		ir_full_state = 4'b1001;
-		mar_state = 4'b1010;
-		mar_full_state = 4'b1011;
-		bus_state = 4'b1100;
-		bus_full_state = 4'b1101;
-		current_state = idle;
-		next_state = done;
-		cache_index = 4'b0;
-		offset = 4'b0;
-		current_index = 5'b0;
-		cache_state = IDLE;      
-		write_state = 0;    
-		retrieve_start = 0;    
-		ram_write_start = 0;     
-		ram_write_done = 0;      
-		accessed_data = 0;       
-	end
+begin
+	cache_state      = IDLE;
+    	retrieve_start   = 1'b0;
+    	ram_write_start  = 1'b0;
+    	ram_write_done   = 1'b0;
+    	write_state      = 3'd0;
+    	fill_word     = 32'd0;
+    	fill_word_ptr = 3'd0;
+    	fill_byte     = 2'd0;
+    	fill_we       = 1'b0;
+    	filling       = 1'b0;
+    	for (k = 0; k < 512; k = k + 1)
+    		tag_ram[k] = 18'd0;
+	for (k = 0; k < 4096; k = k + 1)
+		data_ram[k] = 32'd0;
+    	valid    = 512'd0;
+    	dirty    = 512'd0;
+    	tag_do   = 18'd0;
+    	valid_do = 1'b0;
+    	dirty_do = 1'b0;
+    	wb_word        = 3'd0;
+    	wb_byte        = 2'd0;
+    	wb_shift	= 0;
+end
 	
-    always @*
-    begin
+wire wb_owns  = (cache_state == WRITE_BACK);
+wire [31:0] wb_address   = { victim_tag, idx_r, 5'b00000 };
+wire [31:0] fill_address = { tag_r,      idx_r, 5'b00000 };
+wire hit = valid_do && (tag_do == tag_r);
+wire retrieve_done = fill_we && (fill_word_ptr == 3'd7);
+wire [31:0] cache_address = spc ? PC_CACHE : REGS_CACHE_ADDRESS + CM_CACHE;
+wire [17:0] req_tag  = cache_address[31:14];
+wire [8:0]  req_idx  = cache_address[13:5];
+wire [2:0]  req_word = cache_address[4:2];
+wire [1:0]  req_byte = cache_address[1:0];
+wire [3:0] we = srr32 ? 4'b1111 :
+                    srr16 ? (byte_r[1] ? 4'b1100 : 4'b0011) :
+                    srr8  ? (4'b0001 << byte_r[1:0]) :
+                            4'b0000;
+wire [31:0] store_data = srr8  ? {4{REGS_CACHE_DATA[7:0]}}  :
+                    srr16 ? {2{REGS_CACHE_DATA[15:0]}} :
+                    srr32 ?    REGS_CACHE_DATA         :
+                                        32'b0;
+wire tag_we = (cache_state == INSTALL_LINE) && refill_done;
+wire cpu_owns = (cache_state == ACCESS) || (cache_state == MERGE);
+wire [2:0] ram_word = cpu_owns ? word_r  : wb_owns  ? wb_word : fill_word_ptr;
+wire [8:0]  ram_idx = idx_r;
+wire [11:0] dram_a  = { ram_idx, ram_word };
+wire cpu_wr  = (cache_state == MERGE);
+wire [3:0]  dram_we = cpu_wr ? we : (fill_we ? 4'b1111 : 4'b0000);
+wire [31:0] dram_di = cpu_wr ? store_data : fill_word;
+wire dram_re = cpu_owns || wb_owns || (cache_state == RETRIEVE_WAIT);
+wire [31:0] load_word = dram_do >> { byte_r, 3'b000 };
+wire store_req = |we;
+
+always @*
+begin
         sdevbyte            = 1'b0;
         dev_stop_signal     = 1'b0;
         address_progression = 1'b0;
         cachecontin           = 8'b0;
-        if (CSR_DEV_BUS_IN == 1 && CSR_DEV_BUS_OUT == 2)
+
+        if (CSR_DEV_BUS_IN == 32'd1 && CSR_DEV_BUS_OUT == 32'd2)
         begin
             cachecontin[0] = dev_start_signal;
         end
-        if (CSR_DEV_BUS_IN == 1 && CSR_DEV_BUS_OUT == 2)
+        if (CSR_DEV_BUS_IN == 32'd1 && CSR_DEV_BUS_OUT == 32'd2)
         begin
             dev_stop_signal = cachecontout[0];
         end
-        if (CSR_DEV_BUS_IN == 2 && CSR_DEV_BUS_OUT == 1)
+        if (CSR_DEV_BUS_IN == 32'd2 && CSR_DEV_BUS_OUT == 32'd1)
         begin
             sdevbyte = sdevcache;
         end
-        if (CSR_DEV_BUS_IN == 2 && CSR_DEV_BUS_OUT == 1)
+        if (CSR_DEV_BUS_IN == 32'd2 && CSR_DEV_BUS_OUT == 32'd1)
         begin
             cachecontin[0] = sdevcache;
         end
-        if ((CSR_DEV_BUS_IN == 1 && CSR_DEV_BUS_OUT == 3) || (CSR_DEV_BUS_IN == 3 && CSR_DEV_BUS_OUT == 1))
+        if ((CSR_DEV_BUS_IN == 32'd1 && CSR_DEV_BUS_OUT == 32'd3) || (CSR_DEV_BUS_IN == 32'd3 && CSR_DEV_BUS_OUT == 32'd1))
         begin
             cachecontin[0] = dev_start_signal;
         end
-        if ((CSR_DEV_BUS_IN == 1 && CSR_DEV_BUS_OUT == 3) || (CSR_DEV_BUS_IN == 3 && CSR_DEV_BUS_OUT == 1))
+        if ((CSR_DEV_BUS_IN == 32'd1 && CSR_DEV_BUS_OUT == 32'd3) || (CSR_DEV_BUS_IN == 32'd3 && CSR_DEV_BUS_OUT == 32'd1))
         begin
             address_progression = cachecontout[0];
             dev_stop_signal     = cachecontout[1];
         end
-        if (CSR_DEV_BUS_IN == 3 && CSR_DEV_BUS_OUT == 1)
+        if (CSR_DEV_BUS_IN == 32'd3 && CSR_DEV_BUS_OUT == 32'd1)
         begin
             sdevbyte = cachecontout[0];
         end
-    end
+end
     
-	assign qspi_address = wb_owns ? wb_address : fill_address;
-
-	wire [31:0] cache_address = spc ? PC_CACHE : REGS_CACHE_ADDRESS + CM_CACHE;
-
-    wire [17:0] req_tag  = cache_address[31:14];
-    wire [8:0]  req_idx  = cache_address[13:5];
-    wire [2:0]  req_word = cache_address[4:2];
-    wire [1:0]  req_byte = cache_address[1:0];
-
     // Latched once per transaction. The index and tag must survive the whole
     // miss sequence, so nothing downstream depends on the CPU holding the
     // address stable across a refill.
-    reg [17:0] tag_r;
-    reg [8:0]  idx_r;
-    reg [2:0]  word_r;
-    reg [1:0]  byte_r;
 
-    always @(posedge clk)
+always @(posedge clk)
         if (cache_state == IDLE && ddc)
         begin
             tag_r  <= req_tag;
@@ -134,44 +194,10 @@ initial
     // port is enough and the only thing that needs muxing is the word
     // select within the line -- the index is constant for the whole
     // transaction. (Go true dual-port if you later want hit-under-miss.)
-    reg [2:0] fill_word_ptr;   // refill  : which word of the line
-    reg [2:0] wb_word;         // evict   : which word of the line
-
-    wire cpu_owns = (cache_state == ACCESS) || (cache_state == MERGE);
-    wire wb_owns  = (cache_state == WRITE_BACK);
-
-    wire [2:0] ram_word = cpu_owns ? word_r  :
-                          wb_owns  ? wb_word :
-                                     fill_word_ptr;
-
-    wire [8:0]  ram_idx = idx_r;
-    wire [11:0] dram_a  = { ram_idx, ram_word };
-
     // ------------------------------------------------------- tag array
-    (* ram_style = "block" *) reg [17:0] tag_ram [0:511];
-    reg [511:0] valid;
-    reg [511:0] dirty;
-
-    reg [17:0] tag_do;
-    reg        valid_do;
-    reg        dirty_do;
-
     // The new tag is committed at the end of the refill.
-    wire tag_we = (cache_state == INSTALL_LINE) && retrieve_done;
 
-    integer k;
-    initial
-    begin
-        for (k = 0; k < 512; k = k + 1)
-            tag_ram[k] = 18'd0;
-        valid    = 512'd0;
-        dirty    = 512'd0;
-        tag_do   = 18'd0;
-        valid_do = 1'b0;
-        dirty_do = 1'b0;
-    end
-
-    always @(posedge clk)
+always @(posedge clk)
     begin
         if (tag_we)
             tag_ram[ram_idx] <= tag_r;
@@ -192,59 +218,21 @@ initial
             dirty[ram_idx] <= 1'b1;        // a store just landed
     end
 
-    wire hit = valid_do && (tag_do == tag_r);
-
-    reg [17:0] victim_tag;
     always @(posedge clk)
         if (cache_state == MISS)
-            victim_tag <= tag_do;
-
-    wire [31:0] wb_address   = { victim_tag, idx_r, 5'b00000 };
-    wire [31:0] fill_address = { tag_r,      idx_r, 5'b00000 };
+            victim_tag <= tag_do;    
 
 //writing to data cache
+// refill engine has a complete word
 
-    (* ram_style = "block" *) reg [31:0] data_ram [0:4095];
-    reg [31:0] dram_do;
-
-    reg        fill_we;        // refill engine has a complete word
-    reg [31:0] fill_word;
-
-    wire        cpu_wr  = (cache_state == MERGE);
-    wire [3:0]  dram_we = cpu_wr ? we : (fill_we ? 4'b1111 : 4'b0000);
-    wire [31:0] dram_di = cpu_wr ? store_data : fill_word;
-    wire dram_re = cpu_owns || wb_owns || (cache_state == RETRIEVE_WAIT);
-
-    always @(posedge clk)
-    begin
+always @(posedge clk)
+begin
         if (dram_we[0]) data_ram[dram_a][ 7: 0] <= dram_di[ 7: 0];
         if (dram_we[1]) data_ram[dram_a][15: 8] <= dram_di[15: 8];
         if (dram_we[2]) data_ram[dram_a][23:16] <= dram_di[23:16];
         if (dram_we[3]) data_ram[dram_a][31:24] <= dram_di[31:24];
-        if (dram_re) dram_do <= data_ram[dram_a];
-        
-    end
-
-
-//byte select logic for stores
-    wire [3:0] we = srr32 ? 4'b1111 :
-                    srr16 ? (byte_r[1] ? 4'b1100 : 4'b0011) :
-                    srr8  ? (4'b0001 << byte_r[1:0]) :
-                            4'b0000;
-
-    wire [31:0] store_data = srr8  ? {4{REGS_CACHE_DATA[7:0]}}  :
-                             srr16 ? {2{REGS_CACHE_DATA[15:0]}} :
-                             srr32 ?    REGS_CACHE_DATA         :
-                                        32'b0;
-
-
-// FIX: (cnt_r<<3) and (cnt_w<<3) are self-determined expressions whose width
-// is that of the 6-bit counter, so the byte index wrapped every 8 bytes.
-// Widen the shift to 9 bits before using it as a part-select base.
-
-wire retrieve_done = fill_we && (fill_word_ptr == 3'd7);
-
-assign cache_done = (cache_state == FINISH);
+	if (dram_re) dram_do <= data_ram[dram_a];       
+end
 
 always @(posedge clk)
     accessed_data <= (cache_state == ACCESS);
@@ -258,9 +246,7 @@ begin
 	end
 	if (cache_state == ACCESS && accessed_data)
 	begin
-		//Hit or miss?
-		if (cache_state == ACCESS && accessed_data)
-    			cache_state <= hit ? MERGE : MISS;
+		cache_state <= hit ? (store_req ? MERGE : FINISH) : MISS;
 	end
 	if (cache_state == MISS)
 	begin
@@ -284,20 +270,26 @@ begin
 	if (cache_state == REFILL_LINE)
 	begin
 		retrieve_start <= 1;
-		cache_state <= RETRIEVE_WAIT;	
+		cache_state <= RETRIEVE_WAIT;
+		refill_done <= 1'b0;
 	end
+	else if (fill_we && (fill_word_ptr == 3'd7))
+	begin
+		refill_done <= 1'b1;
+	end	
 	if (cache_state == RETRIEVE_WAIT)
 	begin
 		retrieve_start <= 0;
 		cache_state <= INSTALL_LINE;
 	end
-	if (cache_state == INSTALL_LINE && retrieve_done)
+	if (cache_state == INSTALL_LINE && refill_done)
 	begin
 		cache_state <= ACCESS2;
 	end
 	if (cache_state == MERGE)
 	begin
 		cache_state <= FINISH;
+		load_reg <= dram_do << {byte_r, 3'b000};
 	end
 	if (cache_state == ACCESS2)
 	begin
@@ -309,22 +301,9 @@ begin
 	end	
 end
 
-//RAM retrieve fsm
-    reg [1:0] fill_byte;
-    reg       filling;
-
-    initial
-    begin
-        fill_word     = 32'd0;
-        fill_word_ptr = 3'd0;
-        fill_byte     = 2'd0;
-        fill_we       = 1'b0;
-        filling       = 1'b0;
-    end
-
-    always @(posedge clk)
-    begin
-        fill_we <= 1'b0;
+always @(posedge clk)
+	begin
+        	fill_we <= 1'b0;
 
         if (cache_state == REFILL_LINE)
         begin
@@ -356,31 +335,14 @@ end
                 filling <= 1'b0;
             fill_word_ptr <= fill_word_ptr + 3'd1;
         end
-    end
-
-    
+end
 
 //RAM write fsm
-    reg [1:0] wb_byte;
-
-    wire [7:0] wb_byte_mux = (wb_byte == 2'd0) ? dram_do[ 7: 0] :
-                             (wb_byte == 2'd1) ? dram_do[15: 8] :
-                             (wb_byte == 2'd2) ? dram_do[23:16] :
-                                                 dram_do[31:24];
-
-    reg [31:0] wb_shift;
-
-    initial
-    begin
-        wb_word        = 3'd0;
-        wb_byte        = 2'd0;
-        wb_shift	= 0;
-    end
 
     // change the port: output [7:0] in_byte;  (no longer a reg)
-    assign in_byte = wb_shift[7:0];
+    
 
-    always @(posedge clk)
+always @(posedge clk)
     begin
         ram_write_done <= 1'b0;
 
@@ -428,12 +390,13 @@ end
 
         default : write_state <= 3'd0;
         endcase
-    end
+end
 
-    wire [31:0] load_word = dram_do >> { byte_r, 3'b000 };
-
-    assign CACHE_REGS = load_word;
-    assign CACHE_IR   = sci ? dram_do : 32'b0;   // fetches are word-aligned
-    assign CACHE_MAR  = cache_address;
+assign qspi_address = wb_owns ? wb_address : fill_address;
+assign cache_done = (cache_state == FINISH);
+assign in_byte = wb_shift[7:0];
+assign CACHE_REGS = load_word;
+assign CACHE_IR   = sci ? dram_do : 32'b0;   // fetches are word-aligned
+assign CACHE_MAR  = cache_address;
     
 endmodule
