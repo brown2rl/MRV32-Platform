@@ -1,19 +1,19 @@
-module CACHE(clk, spc/*formerly spm*/, ddc, sci, busy_w, srr8, srr16, srr32, lb, lbu, lh, lhu, ram_write_start, in_byte, retrieve_start,
- out_byte, out_byte_ready, byte_received, sdevbyte, dev_stop_signal, dev_start_signal, sdevcache, qspi_address, 
+module CACHE(clk, spc/*formerly spm*/, ddc, sci, busy_w, srr8, srr16, srr32, lb, lbu, lh, lhu, ram_write_start, in_bytes, retrieve_start,
+ out_bytes, out_bytes_ready, bytes_received, sdevbit, dev_stop_signal, dev_start_signal, sdevcache, qspi_address, 
 address_progression, cachecontin, cachecontout, CM_CACHE, PC_CACHE, REGS_CACHE_DATA, REGS_CACHE_ADDRESS, CSR_DEV_BUS_IN,
  CSR_DEV_BUS_OUT, CACHE_IR, CACHE_REGS, cache_done);
 
-input clk, spc, sci, ddc, out_byte_ready, byte_received, dev_start_signal, 
+input clk, spc, sci, ddc, out_bytes_ready, bytes_received, dev_start_signal, 
 sdevcache, busy_w, srr8, srr16, srr32, lb, lbu, lh, lhu;
-input[7:0] out_byte, cachecontout;
+input[7:0] out_bytes, cachecontout;
 input[31:0] PC_CACHE, REGS_CACHE_ADDRESS, REGS_CACHE_DATA, CSR_DEV_BUS_IN, CSR_DEV_BUS_OUT, CM_CACHE;
 
 output[31:0] CACHE_IR, CACHE_REGS;
 output cache_done;
 output reg retrieve_start;
-output reg ram_write_start, dev_stop_signal, sdevbyte, address_progression;
+output reg ram_write_start, dev_stop_signal, sdevbit, address_progression;
 output reg[7:0] cachecontin;
-output[7:0] in_byte;
+output[7:0] in_bytes;
 output [24:0] qspi_address;
 
 // ---------------------------------------------------------
@@ -35,7 +35,7 @@ reg ram_write_done;
 
 reg [31:0] fill_word;
 reg [2:0]  fill_word_ptr;
-reg [1:0]  fill_byte;
+reg [1:0]  fill_bits;
 reg         fill_we;
 reg         filling;
 
@@ -44,7 +44,7 @@ reg         filling;
 // ---------------------------------------------------------
 
 reg [2:0]  wb_word;
-reg [1:0]  wb_byte;
+reg [1:0]  wb_bits;
 reg [2:0]  write_state;
 reg [31:0] wb_shift;
 
@@ -55,7 +55,7 @@ reg [31:0] wb_shift;
 reg [17:0] tag_r;
 reg [8:0]  idx_r;
 reg [2:0]  word_r;
-reg [1:0]  byte_r;
+reg [1:0]  bits_r;
 reg [17:0] victim_tag;
 reg [511:0] valid;
 reg [511:0] dirty;
@@ -89,7 +89,7 @@ begin
     	write_state      = 3'd0;
     	fill_word     = 32'd0;
     	fill_word_ptr = 3'd0;
-    	fill_byte     = 2'd0;
+    	fill_bits     = 2'd0;
     	fill_we       = 1'b0;
     	filling       = 1'b0;
     	for (k = 0; k < 512; k = k + 1)
@@ -102,14 +102,14 @@ begin
     	valid_do = 1'b0;
     	dirty_do = 1'b0;
     	wb_word  = 3'd0;
-    	wb_byte  = 2'd0;
+    	wb_bits  = 2'd0;
     	wb_shift = 32'd0;
 	tag_r = 18'd0;
 	idx_r = 9'd0;
 	word_r = 3'd0;
 	refill_done = 1'b0;
 	dram_do = 32'd0;
-	byte_r = 2'd0;
+	bits_r = 2'd0;
 	victim_tag = 18'd0;
 end
 
@@ -121,10 +121,10 @@ wire [31:0] cache_address = spc ? PC_CACHE : REGS_CACHE_ADDRESS + CM_CACHE;
 wire [17:0] req_tag  = cache_address[31:14];
 wire [8:0]  req_idx  = cache_address[13:5];
 wire [2:0]  req_word = cache_address[4:2];
-wire [1:0]  req_byte = cache_address[1:0];
+wire [1:0]  req_bits = cache_address[1:0];
 wire [3:0] we = srr32 ? 4'b1111 :
-                    srr16 ? (byte_r[1] ? 4'b1100 : 4'b0011) :
-                    srr8  ? (4'b0001 << byte_r[1:0]) :
+                    srr16 ? (bits_r[1] ? 4'b1100 : 4'b0011) :
+                    srr8  ? (4'b0001 << bits_r[1:0]) :
                             4'b0000;
 wire [31:0] store_data = srr8  ? {4{REGS_CACHE_DATA[7:0]}}  :
                     srr16 ? {2{REGS_CACHE_DATA[15:0]}} :
@@ -139,12 +139,12 @@ wire cpu_wr  = (cache_state == MERGE);
 wire [3:0]  dram_we = cpu_wr ? we : (fill_we ? 4'b1111 : 4'b0000);
 wire [31:0] dram_di = cpu_wr ? store_data : fill_word;
 wire dram_re = cpu_owns || wb_owns || (cache_state == RETRIEVE_WAIT);
-wire [31:0] load_word = dram_do >> {byte_r,3'b000};
+wire [31:0] load_word = dram_do >> {bits_r,3'b000};
 wire store_req = |we;
 
 always @*
 begin
-        sdevbyte            = 1'b0;
+        sdevbit            = 1'b0;
         dev_stop_signal     = 1'b0;
         address_progression = 1'b0;
         cachecontin           = 8'b0;
@@ -159,7 +159,7 @@ begin
         end
         if (CSR_DEV_BUS_IN == 32'd2 && CSR_DEV_BUS_OUT == 32'd1)
         begin
-            sdevbyte = sdevcache;
+            sdevbit = sdevcache;
         end
         if (CSR_DEV_BUS_IN == 32'd2 && CSR_DEV_BUS_OUT == 32'd1)
         begin
@@ -176,7 +176,7 @@ begin
         end
         if (CSR_DEV_BUS_IN == 32'd3 && CSR_DEV_BUS_OUT == 32'd1)
         begin
-            sdevbyte = cachecontout[0];
+            sdevbit = cachecontout[0];
         end
 end
     
@@ -190,7 +190,7 @@ always @(posedge clk)
             tag_r  <= req_tag;
             idx_r  <= req_idx;
             word_r <= req_word;
-            byte_r <= req_byte;
+            bits_r <= req_bits;
         end
 
     // ------------------------------------------------- port arbitration
@@ -312,22 +312,22 @@ always @(posedge clk)
         if (cache_state == REFILL_LINE)
         begin
             fill_word_ptr <= 3'd0;
-            fill_byte     <= 2'd0;
+            fill_bits    <= 2'd0;
             filling       <= 1'b1;
         end
 
-        if (filling && out_byte_ready)
+        if (filling && out_bytes_ready)
         begin
-            case (fill_byte)
-                2'd0 : fill_word[ 7: 0] <= out_byte;
-                2'd1 : fill_word[15: 8] <= out_byte;
-                2'd2 : fill_word[23:16] <= out_byte;
-                2'd3 : fill_word[31:24] <= out_byte;
+            case (fill_bits)
+                2'd0 : fill_word[ 7: 0] <= out_bytes;
+                2'd1 : fill_word[15: 8] <= out_bytes;
+                2'd2 : fill_word[23:16] <= out_bytes;
+                2'd3 : fill_word[31:24] <= out_bytes;
             endcase
 
-            fill_byte <= fill_byte + 2'd1;
+            fill_bits <= fill_bits + 2'd1;
 
-            if (fill_byte == 2'd3)
+            if (fill_bits == 2'd3)
                 fill_we <= 1'b1;           // word complete, write it next cycle
         end
 
@@ -343,7 +343,7 @@ end
 
 //RAM write fsm
 
-    // change the port: output [7:0] in_byte;  (no longer a reg)
+    // change the port: output [7:0] in_bytes;  (no longer a reg)
     
 
 always @(posedge clk)
@@ -355,7 +355,7 @@ always @(posedge clk)
         3'd0 : if (ram_write_start)
                begin
                    wb_word     <= 3'd0;
-                   wb_byte     <= 2'd0;
+                   wb_bits     <= 2'd0;
                    write_state <= 3'd1;
                end
 
@@ -369,11 +369,11 @@ always @(posedge clk)
                    write_state <= 3'd3;
                end
 
-        3'd3 : if (byte_received)
+        3'd3 : if (bytes_received)
                begin
-                   if (wb_byte == 2'd3)
+                   if (wb_bits == 2'd3)
                    begin
-                       wb_byte <= 2'd0;
+                       wb_bits <= 2'd0;
                        if (wb_word == 3'd0)        // wrapped past word 7
                        begin
                            ram_write_done <= 1'b1;
@@ -388,7 +388,7 @@ always @(posedge clk)
                    else
                    begin
                        wb_shift <= { 8'h00, wb_shift[31:8] };
-                       wb_byte  <= wb_byte + 2'd1;
+                       wb_bits  <= wb_bits + 2'd1;
                    end
                end
 
@@ -398,7 +398,7 @@ end
 
 assign qspi_address = wb_owns ? wb_address : fill_address;
 assign cache_done = (cache_state == FINISH);
-assign in_byte = wb_shift[7:0];
+assign in_bytes = wb_shift[7:0];
 assign CACHE_REGS =
     lb  ? {{24{load_word[7]}},  load_word[7:0]}  :
     lbu ? {24'b0,              load_word[7:0]}  :
