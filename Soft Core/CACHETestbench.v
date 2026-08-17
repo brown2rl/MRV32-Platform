@@ -18,12 +18,12 @@ module CACHE_tb;
     reg lh;
     reg lhu;
 
-    reg out_byte_ready;
-    reg byte_received;
+    reg out_bytes_ready;
+    reg bytes_received;
     reg dev_start_signal;
     reg sdevcache;
 
-    reg [7:0] out_byte;
+    reg [7:0] out_bytes;
     reg [7:0] cachecontout;
 
     reg [31:0] PC_CACHE;
@@ -37,10 +37,10 @@ module CACHE_tb;
     wire retrieve_start;
     wire ram_write_start;
     wire dev_stop_signal;
-    wire sdevbyte;
+    wire sdevbit;
     wire address_progression;
     wire [7:0] cachecontin;
-    wire [7:0] in_byte;
+    wire [7:0] in_bytes;
     wire [24:0] qspi_address;
     wire [31:0] CACHE_IR;
     wire [31:0] CACHE_REGS;
@@ -94,13 +94,13 @@ module CACHE_tb;
         lh = 0;
         lhu = 0;
 
-        out_byte_ready = 0;
-        byte_received = 0;
+        out_bytes_ready = 0;
+        bytes_received = 0;
 
         dev_start_signal = 0;
         sdevcache = 0;
 
-        out_byte = 8'h00;
+        out_bytes = 8'h00;
         cachecontout = 8'h00;
 
         PC_CACHE = 32'h00001000;
@@ -115,12 +115,11 @@ module CACHE_tb;
         // Start memory read
         //------------------------------------------------
 
-        #20;
+	@(posedge clk);
+	ddc <= 1;
 
-        ddc = 1;
-
-        #10;
-        ddc = 0;
+	@(posedge clk);
+	ddc <= 0;
 
         //------------------------------------------------
         // Wait for refill request
@@ -130,6 +129,7 @@ module CACHE_tb;
 
         $display("Refill started at %t", $time);
 
+
         //------------------------------------------------
         // Send 8 words (32 bytes)
         //------------------------------------------------
@@ -138,13 +138,15 @@ module CACHE_tb;
         begin
             @(posedge clk);
 
-            out_byte       <= i;
-            out_byte_ready <= 1'b1;
+            out_bytes       <= i;
+            out_bytes_ready <= 1'b1;
 
             @(posedge clk);
 
-            out_byte_ready <= 1'b0;
+            out_bytes_ready <= 1'b0;
         end
+
+
 
         //------------------------------------------------
         // Wait for completion
@@ -156,8 +158,55 @@ module CACHE_tb;
 
         #50;
 
-        $finish;
+// testing write-back
+	@(posedge clk); // finish to idle transition
+
+	@(posedge clk);
+
+        REGS_CACHE_DATA <= 32'hAABBCCDD;
+
+	srr32 <= 1;
+
+	@(posedge clk);
+	ddc = 1;
+
+	@(posedge clk);
+	ddc = 0;
+
+	wait(cache_done);
+
+	@(posedge clk);
+	REGS_CACHE_ADDRESS <= 32'h40002000;
+	
+	ddc = 1;
+
+	@(posedge clk);
+	ddc = 0;
+
+        wait(retrieve_start);
+
+        $display("Refill started at %t", $time);
+
+        for (i = 0; i < 32; i = i + 1)
+        begin
+            @(posedge clk);
+
+            out_bytes       <= i;
+            out_bytes_ready <= 1'b1;
+
+            @(posedge clk);
+
+            out_bytes_ready <= 1'b0;
+        end
+
+	wait(cache_done);
+
+	srr32 <= 0;
+        //$finish;
     end
+
+always @(ddc)
+        $display("DDC pulse seen at %0t", $time);
 
     //----------------------------------------------------
     // VCD dump
@@ -167,6 +216,114 @@ module CACHE_tb;
         $dumpfile("cache.vcd");
         $dumpvars(0, CACHE_tb);
     end
+
+always @(posedge clk)
+begin
+    $display(
+      "state=%0d hit=%b valid=%b dirty=%b store_req=%b we=%b ddc=%d, done=%d",
+      dut.cache_state,
+      dut.hit,
+      dut.valid_do,
+      dut.dirty_do,
+      dut.store_req,
+      dut.we,
+      ddc,
+      cache_done
+    );
+end
+
+always @(posedge clk)
+begin
+    if (dut.out_bytes_ready)
+        $display(
+            "fill_bits=%0d fill_word_ptr=%0d fill_we=%b",
+            dut.fill_bits,
+            dut.fill_word_ptr,
+            dut.fill_we
+        );
+end
+
+always @(posedge clk)
+begin
+    if (dut.cache_state == dut.ACCESS && dut.accessed_data)
+	$display("ACCESS occured: hit=%b store_req=%b we=%b tag_do=%h tag_r=%h",
+		dut.hit,
+		dut.store_req,
+		dut.we,
+		dut.tag_do,
+		dut.tag_r);
+    if (dut.cache_state == dut.MERGE)
+        $display("MERGE occurred");
+    if (dut.cache_state == dut.MISS)
+	$display("idx=%d dirty[idx]=%b dirty_do=%b tag_do=%h tag_r=%h", dut.idx_r, dut.dirty[dut.idx_r], dut.dirty_do, dut.tag_do, dut.tag_r); 
+end
+
+//-----------------------------
+// RAM sync model
+//-----------------------------
+reg [7:0] wb_ram [0:31];
+
+integer wb_count;
+integer j;
+
+initial begin
+    wb_count = 0;
+end
+
+always @(posedge clk)
+begin
+    bytes_received <= 0;
+
+    if (dut.cache_state == dut.WRITE_BACK && dut.write_state == 3'd3 && !dut.ram_write_done && wb_count < 32)
+    begin
+        wb_ram[wb_count] <= in_bytes;
+
+        bytes_received <= 1;
+
+        $display(
+            "WB byte %0d : data=%02h word=%0d byte=%0d",
+            wb_count,
+            in_bytes,
+            dut.wb_word,
+            dut.wb_bits
+        );
+
+        wb_count <= wb_count + 1;
+    end
+
+    if (dut.ram_write_done)
+    begin
+        $display(
+            "ram_write_done asserted after %0d bytes",
+            wb_count
+        );
+
+        $display("\nWrite-back RAM contents:");
+
+        for (j=0; j<32; j=j+1)
+            $display("[%0d] = %02h", j, wb_ram[j]);
+    end
+
+    if (dut.cache_state == dut.WRITE_BACK)
+    begin
+        $display(
+            "T=%0t wb_word=%0d wb_byte=%0d in_byte=%02h",
+            $time,
+            dut.wb_word,
+            dut.wb_bits,
+            in_bytes
+        );
+    end
+end
+
+always @(posedge clk)
+begin
+    if (dut.bytes_received)
+        $display("w=%0d b=%0d data=%02h",
+                 dut.wb_word,
+                 dut.wb_bits,
+                 in_bytes);
+end
 
     //----------------------------------------------------
     // DUT
@@ -190,15 +347,15 @@ module CACHE_tb;
 
         .ram_write_start(ram_write_start),
 
-        .in_byte(in_byte),
+        .in_bytes(in_bytes),
 
         .retrieve_start(retrieve_start),
-        .out_byte(out_byte),
-        .out_byte_ready(out_byte_ready),
+        .out_bytes(out_bytes),
+        .out_bytes_ready(out_bytes_ready),
 
-        .byte_received(byte_received),
+        .bytes_received(bytes_received),
 
-        .sdevbyte(sdevbyte),
+        .sdevbit(sdevbit),
         .dev_stop_signal(dev_stop_signal),
         .dev_start_signal(dev_start_signal),
 
