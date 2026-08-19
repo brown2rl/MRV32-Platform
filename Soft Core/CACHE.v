@@ -1,19 +1,18 @@
-module CACHE(clk, spc/*formerly spm*/, ddc, sci, busy_w, srr8, srr16, srr32, lb, lbu, lh, lhu, ram_write_start, in_bytes, retrieve_start,
- out_bytes, out_bytes_ready, bytes_received, sdevbit, dev_stop_signal, dev_start_signal, sdevcache, qspi_address, 
+module CACHE(clk, spc/*formerly spm*/, ddc, sci, busy_w, srr8, srr16, srr32, /*sramrs8, sramrs16, sramrs32, sramru8, sramru16,*/ lb, lbu, lh, lhu, ram_write_start, in_bytes, retrieve_start,
+ out_bytes, out_bytes_ready, bytes_received, sdevbit, dev_stop_signal, dev_start_signal, /*scachedev,*/ sdevcache, qspi_address, 
 address_progression, cachecontin, cachecontout, CM_CACHE, PC_CACHE, REGS_CACHE_DATA, REGS_CACHE_ADDRESS, CSR_DEV_BUS_IN,
- CSR_DEV_BUS_OUT, CACHE_IR, CACHE_REGS, cache_done);
+ CSR_DEV_BUS_OUT, CACHE_IR, CACHE_REGS, cache_done, CACHE_DEV, rom_sel);
 
 input clk, spc, sci, ddc, out_bytes_ready, bytes_received, dev_start_signal, 
-sdevcache, busy_w, srr8, srr16, srr32, lb, lbu, lh, lhu;
+/*scachedev,*/ sdevcache, busy_w, srr8, srr16, srr32, lb, lbu, lh, lhu /*, sramrs8, sramrs16, sramrs32, sramru8, sramru16*/;
 input[7:0] out_bytes, cachecontout;
 input[31:0] PC_CACHE, REGS_CACHE_ADDRESS, REGS_CACHE_DATA, CSR_DEV_BUS_IN, CSR_DEV_BUS_OUT, CM_CACHE;
 
 output[31:0] CACHE_IR, CACHE_REGS;
 output cache_done;
-output reg retrieve_start;
-output reg ram_write_start, dev_stop_signal, sdevbit, address_progression;
+output reg retrieve_start, ram_write_start, dev_stop_signal, sdevbit, address_progression, rom_sel;
 output reg[7:0] cachecontin;
-output[7:0] in_bytes;
+output[7:0] in_bytes, CACHE_DEV;
 output [24:0] qspi_address;
 
 // ---------------------------------------------------------
@@ -65,6 +64,13 @@ reg [31:0] dram_do;
 (* ram_style = "block" *) reg [17:0] tag_ram [0:511];
 (* ram_style = "block" *) reg [31:0] data_ram [0:4095];
 
+//----
+//ROM
+//----
+
+reg[31:0] ROM_OUT;
+
+
 localparam
 	IDLE = 3,
 	ACCESS = 4,
@@ -113,6 +119,10 @@ begin
 	victim_tag = 18'd0;
 end
 
+//---
+// wires
+//---
+
 wire wb_owns  = (cache_state == WRITE_BACK);
 wire [31:0] wb_address   = { victim_tag, idx_r, 5'b00000 };
 wire [31:0] fill_address = { tag_r,      idx_r, 5'b00000 };
@@ -141,6 +151,11 @@ wire [31:0] dram_di = cpu_wr ? store_data : fill_word;
 wire dram_re = cpu_owns || wb_owns || (cache_state == RETRIEVE_WAIT);
 wire [31:0] load_word = dram_do >> {bits_r,3'b000};
 wire store_req = |we;
+wire rom_hit = (cache_address >= 32'd68000000) && (cache_address <= 32'd68000200);
+
+//---
+// logic
+//---
 
 always @*
 begin
@@ -179,7 +194,15 @@ begin
             sdevbit = cachecontout[0];
         end
 end
-    
+
+always @(posedge clk)
+    begin
+    	if (CSR_DEV_BUS_IN == 1 && CSR_DEV_BUS_OUT == 2)
+    	begin
+    		CACHE_DEV <= CACHE_REGS[7:0];
+    	end
+    end
+
     // Latched once per transaction. The index and tag must survive the whole
     // miss sequence, so nothing downstream depends on the CPU holding the
     // address stable across a refill.
@@ -396,6 +419,75 @@ always @(posedge clk)
         endcase
 end
 
+always @(posedge clk)
+    begin
+        if (spc)
+        begin
+            rom_sel <= rom_hit;
+            case (cache_address[7:2])
+            6'd0  : ROM_OUT <= 32'h00000117;
+            6'd1  : ROM_OUT <= 32'h09410113;
+            6'd2  : ROM_OUT <= 32'h00C000EF;
+            6'd3  : ROM_OUT <= 32'h7C651073;
+            6'd4  : ROM_OUT <= 32'h00008067;
+            6'd5  : ROM_OUT <= 32'hFF010113;
+            6'd6  : ROM_OUT <= 32'h00812423;
+            6'd7  : ROM_OUT <= 32'h00912223;
+            6'd8  : ROM_OUT <= 32'h00112623;
+            6'd9  : ROM_OUT <= 32'h00000413;
+            6'd10 : ROM_OUT <= 32'h00600493;
+            6'd11 : ROM_OUT <= 32'h7D040593;
+            6'd12 : ROM_OUT <= 32'h00941513;
+            6'd13 : ROM_OUT <= 32'h00140413;
+            6'd14 : ROM_OUT <= 32'h024000EF;
+            6'd15 : ROM_OUT <= 32'hFE9418E3;
+            6'd16 : ROM_OUT <= 32'h00100793;
+            6'd17 : ROM_OUT <= 32'h00000067;
+            6'd18 : ROM_OUT <= 32'h00C12083;
+            6'd19 : ROM_OUT <= 32'h00812403;
+            6'd20 : ROM_OUT <= 32'h00412483;
+            6'd21 : ROM_OUT <= 32'h01010113;
+            6'd22 : ROM_OUT <= 32'h00008067;
+            6'd23 : ROM_OUT <= 32'h00100293;
+            6'd24 : ROM_OUT <= 32'h00300313;
+            6'd25 : ROM_OUT <= 32'h7C431073;
+            6'd26 : ROM_OUT <= 32'h7C529073;
+            6'd27 : ROM_OUT <= 32'h00B50023;
+            6'd28 : ROM_OUT <= 32'h7C401073;
+            6'd29 : ROM_OUT <= 32'h7C501073;
+            6'd30 : ROM_OUT <= 32'h00100513;
+            6'd31 : ROM_OUT <= 32'h00008067;
+            6'd32 : ROM_OUT <= 32'h00000000;
+            6'd33 : ROM_OUT <= 32'h00000000;
+            6'd34 : ROM_OUT <= 32'h00000000;
+            6'd35 : ROM_OUT <= 32'h00000000;
+            6'd36 : ROM_OUT <= 32'h00000000;
+            6'd37 : ROM_OUT <= 32'h00000000;
+            6'd38 : ROM_OUT <= 32'h00000000;
+            6'd39 : ROM_OUT <= 32'h00000000;
+            6'd40 : ROM_OUT <= 32'h00000000;
+            6'd41 : ROM_OUT <= 32'h00000000;
+            6'd42 : ROM_OUT <= 32'h00000000;
+            6'd43 : ROM_OUT <= 32'h00000000;
+            6'd44 : ROM_OUT <= 32'h00000000;
+            6'd45 : ROM_OUT <= 32'h00000000;
+            6'd46 : ROM_OUT <= 32'h00000000;
+            6'd47 : ROM_OUT <= 32'h00000000;
+            6'd48 : ROM_OUT <= 32'h00000000;
+            6'd49 : ROM_OUT <= 32'h00000000;
+            6'd50 : ROM_OUT <= 32'h00000000;
+            default: ROM_OUT <= 32'h00000000;
+            endcase
+        end
+    end
+
+    always @*
+        CACHE_IR = rom_sel ? ROM_OUT : dram_do;
+
+//---
+// assigns
+//---
+
 assign qspi_address = wb_owns ? wb_address : fill_address;
 assign cache_done = (cache_state == FINISH);
 assign in_bytes = wb_shift[7:0];
@@ -405,6 +497,5 @@ assign CACHE_REGS =
     lh  ? {{16{load_word[15]}}, load_word[15:0]} :
     lhu ? {16'b0,              load_word[15:0]} :
            load_word;
-assign CACHE_IR   = sci ? dram_do : 32'b0;   // fetches are word-aligned
     
 endmodule
