@@ -39,12 +39,17 @@ module CACHE_tb;
     wire dev_stop_signal;
     wire sdevbit;
     wire address_progression;
-    wire [7:0] cachecontin;
-    wire [7:0] in_bytes;
+    wire [7:0] cachecontin, in_bytes, CACHE_DEV;
     wire [24:0] qspi_address;
     wire [31:0] CACHE_IR;
     wire [31:0] CACHE_REGS;
     wire cache_done;
+    wire rom_sel;
+
+//-----------------------------
+// RAM sync model
+//-----------------------------
+reg [7:0] wb_ram [0:31];
 
     //----------------------------------------------------
     // Clock
@@ -75,6 +80,8 @@ module CACHE_tb;
     //----------------------------------------------------
 
     integer i;
+    integer wb_count;
+    integer j;
 
     initial begin
 
@@ -99,6 +106,8 @@ module CACHE_tb;
 
         dev_start_signal = 0;
         sdevcache = 0;
+
+	wb_count = 0;
 
         out_bytes = 8'h00;
         cachecontout = 8'h00;
@@ -245,6 +254,8 @@ end
 
 always @(posedge clk)
 begin
+    bytes_received <= 1;
+    
     if (dut.cache_state == dut.ACCESS && dut.accessed_data)
 	$display("ACCESS occured: hit=%b store_req=%b we=%b tag_do=%h tag_r=%h",
 		dut.hit,
@@ -256,29 +267,23 @@ begin
         $display("MERGE occurred");
     if (dut.cache_state == dut.MISS)
 	$display("idx=%d dirty[idx]=%b dirty_do=%b tag_do=%h tag_r=%h", dut.idx_r, dut.dirty[dut.idx_r], dut.dirty_do, dut.tag_do, dut.tag_r); 
-end
-
-//-----------------------------
-// RAM sync model
-//-----------------------------
-reg [7:0] wb_ram [0:31];
-
-integer wb_count;
-integer j;
-
-initial begin
-    wb_count = 0;
-end
-
-always @(posedge clk)
-begin
-    bytes_received <= 0;
-
     if (dut.cache_state == dut.WRITE_BACK && dut.write_state == 3'd3 && !dut.ram_write_done && wb_count < 32)
     begin
-        wb_ram[wb_count] <= in_bytes;
+	$display(
+    		"RAM WRITING t=%0t wb_bits=%0d wb_shift=%h in_bytes=%h data_ram_0=%h data_ram_1=%h",
+    			$time,
+    				dut.wb_bits,
+    				dut.wb_shift,
+    				in_bytes,
+				dut.data_ram[{dut.idx_r,3'd0}],
+				dut.data_ram[{dut.idx_r,3'd1}]
+		);
+	
+        	wb_ram[wb_count] <= in_bytes;
+        	wb_count <= wb_count + 1;
 
-        bytes_received <= 1;
+ 
+	bytes_received <= 1;
 
         $display(
             "WB byte %0d : data=%02h word=%0d byte=%0d",
@@ -287,10 +292,7 @@ begin
             dut.wb_word,
             dut.wb_bits
         );
-
-        wb_count <= wb_count + 1;
     end
-
     if (dut.ram_write_done)
     begin
         $display(
@@ -303,26 +305,11 @@ begin
         for (j=0; j<32; j=j+1)
             $display("[%0d] = %02h", j, wb_ram[j]);
     end
-
-    if (dut.cache_state == dut.WRITE_BACK)
-    begin
-        $display(
-            "T=%0t wb_word=%0d wb_byte=%0d in_byte=%02h",
-            $time,
-            dut.wb_word,
-            dut.wb_bits,
-            in_bytes
-        );
-    end
 end
 
 always @(posedge clk)
 begin
-    if (dut.bytes_received)
-        $display("w=%0d b=%0d data=%02h",
-                 dut.wb_word,
-                 dut.wb_bits,
-                 in_bytes);
+
 end
 
     //----------------------------------------------------
@@ -379,8 +366,10 @@ end
 
         .CACHE_IR(CACHE_IR),
         .CACHE_REGS(CACHE_REGS),
+	.CACHE_DEV(CACHE_DEV),
 
-        .cache_done(cache_done)
+        .cache_done(cache_done),
+	.rom_sel(rom_sel)
     );
 
 endmodule

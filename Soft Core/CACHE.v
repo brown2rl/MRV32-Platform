@@ -11,8 +11,8 @@ input[31:0] PC_CACHE, REGS_CACHE_ADDRESS, REGS_CACHE_DATA, CSR_DEV_BUS_IN, CSR_D
 output[31:0] CACHE_IR, CACHE_REGS;
 output cache_done;
 output reg retrieve_start, ram_write_start, dev_stop_signal, sdevbit, address_progression, rom_sel;
-output reg[7:0] cachecontin;
-output[7:0] in_bytes, CACHE_DEV;
+output reg[7:0] in_bytes, cachecontin, CACHE_DEV;
+//output[[7:0] in_bytes;
 output [24:0] qspi_address;
 
 // ---------------------------------------------------------
@@ -93,6 +93,7 @@ begin
 	accessed_data = 1'b0;
     	ram_write_done   = 1'b0;
     	write_state      = 3'd0;
+	in_bytes 	= 8'd0;
     	fill_word     = 32'd0;
     	fill_word_ptr = 3'd0;
     	fill_bits     = 2'd0;
@@ -367,8 +368,6 @@ end
 //RAM write fsm
 
     // change the port: output [7:0] in_bytes;  (no longer a reg)
-    
-
 always @(posedge clk)
     begin
         ram_write_done <= 1'b0;
@@ -390,10 +389,19 @@ always @(posedge clk)
         3'd2 : begin
                    wb_shift    <= dram_do;     // word 0 latched
                    write_state <= 3'd3;
+		   in_bytes <= dram_do[7:0];
                end
 
         3'd3 : if (bytes_received)
                begin
+        $display(
+            "%t recv=%b bits=%0d in=%02h shift=%08h",
+            $time,
+            bytes_received,
+            wb_bits,
+            in_bytes,
+            wb_shift
+        );
                    if (wb_bits == 2'd3)
                    begin
                        wb_bits <= 2'd0;
@@ -406,12 +414,21 @@ always @(posedge clk)
                        begin
                            wb_shift <= dram_do;    // already prefetched
                            wb_word  <= wb_word + 3'd1;
+			   in_bytes <= dram_do[7:0];
                        end
                    end
                    else
                    begin
                        wb_shift <= { 8'h00, wb_shift[31:8] };
+		       in_bytes <= wb_shift[15:8];
                        wb_bits  <= wb_bits + 2'd1;
+$display(
+  "SEND word=%0d bits=%0d shift=%08h in=%02h",
+  wb_word,
+  wb_bits,
+  wb_shift,
+  in_bytes
+);
                    end
                end
 
@@ -481,21 +498,19 @@ always @(posedge clk)
         end
     end
 
-    always @*
-        CACHE_IR = rom_sel ? ROM_OUT : dram_do;
-
 //---
 // assigns
 //---
 
 assign qspi_address = wb_owns ? wb_address : fill_address;
 assign cache_done = (cache_state == FINISH);
-assign in_bytes = wb_shift[7:0];
+//assign in_bytes = wb_shift[7:0];
 assign CACHE_REGS =
     lb  ? {{24{load_word[7]}},  load_word[7:0]}  :
     lbu ? {24'b0,              load_word[7:0]}  :
     lh  ? {{16{load_word[15]}}, load_word[15:0]} :
     lhu ? {16'b0,              load_word[15:0]} :
            load_word;
+assign CACHE_IR = rom_sel ? ROM_OUT : dram_do;
     
 endmodule
